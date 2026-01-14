@@ -1,57 +1,51 @@
-from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
 from docx import Document
-import tempfile
-import os
-import shutil
+from io import BytesIO
 
 app = FastAPI()
 
 @app.post("/download-doc")
-async def download_doc(
-    file: UploadFile = File(...),
-    client_name: str = Form(None),
-    customer: str = Form(None),
-    contractor: str = Form(None),
-    nature: str = Form(None),
-    purpose: str = Form(None),
-    created_on: str = Form(None),
-    created_by: str = Form(None),
-):
-    temp_dir = tempfile.mkdtemp()
+def download_doc(payload: dict):
+    """
+    payload = {
+      client_name, customer, contractor,
+      nature, purpose, created_on, created_by,
+      file_base64   <-- uploaded file
+    }
+    """
 
-    uploaded_path = os.path.join(temp_dir, file.filename)
-    with open(uploaded_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    # 1️⃣ Load uploaded Word file
+    import base64
+    original_bytes = base64.b64decode(payload["file_base64"])
+    original_doc = Document(BytesIO(original_bytes))
 
-    # --- Create cover page ---
+    # 2️⃣ Create cover page
     cover = Document()
     cover.add_heading("Document Details", level=1)
+    cover.add_paragraph(f"Client Name : {payload.get('client_name')}")
+    cover.add_paragraph(f"Customer    : {payload.get('customer')}")
+    cover.add_paragraph(f"Contractor  : {payload.get('contractor')}")
+    cover.add_paragraph(f"Nature      : {payload.get('nature')}")
+    cover.add_paragraph(f"Purpose     : {payload.get('purpose')}")
+    cover.add_paragraph(f"Created On  : {payload.get('created_on')}")
+    cover.add_paragraph(f"Created By  : {payload.get('created_by')}")
 
-    def add(label, value):
-        cover.add_paragraph(f"{label} : {value if value else 'None'}")
-
-    add("Client Name", client_name)
-    add("Customer", customer)
-    add("Contractor", contractor)
-    add("Nature", nature)
-    add("Purpose", purpose)
-    add("Created On", created_on)
-    add("Created By", created_by)
-
-    # Page break
     cover.add_page_break()
 
-    # --- Append uploaded document ---
-    original = Document(uploaded_path)
-    for element in original.element.body:
+    # 3️⃣ Merge documents (PROPER WAY)
+    for element in original_doc.element.body:
         cover.element.body.append(element)
 
-    final_path = os.path.join(temp_dir, "final_document.docx")
-    cover.save(final_path)
+    # 4️⃣ Return merged file
+    output = BytesIO()
+    cover.save(output)
+    output.seek(0)
 
-    return FileResponse(
-        final_path,
+    return StreamingResponse(
+        output,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename="Document_With_Cover.docx"
+        headers={
+            "Content-Disposition": "attachment; filename=Document_With_Cover.docx"
+        }
     )
