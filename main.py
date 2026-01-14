@@ -1,44 +1,57 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
 from docx import Document
 import tempfile
 import os
+import shutil
 
 app = FastAPI()
 
-class CoverData(BaseModel):
-    client_name: str | None = None
-    customer: str | None = None
-    contractor: str | None = None
-    nature: str | None = None
-    purpose: str | None = None
-    created_on: str | None = None
-    created_by: str | None = None
+@app.post("/download-doc")
+async def download_doc(
+    file: UploadFile = File(...),
+    client_name: str = Form(None),
+    customer: str = Form(None),
+    contractor: str = Form(None),
+    nature: str = Form(None),
+    purpose: str = Form(None),
+    created_on: str = Form(None),
+    created_by: str = Form(None),
+):
+    temp_dir = tempfile.mkdtemp()
 
-@app.post("/cover-doc")
-def generate_cover(data: CoverData):
-    doc = Document()
+    uploaded_path = os.path.join(temp_dir, file.filename)
+    with open(uploaded_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
 
-    doc.add_heading("Document Details", level=1)
+    # --- Create cover page ---
+    cover = Document()
+    cover.add_heading("Document Details", level=1)
 
     def add(label, value):
-        doc.add_paragraph(f"{label} : {value if value else 'None'}")
+        cover.add_paragraph(f"{label} : {value if value else 'None'}")
 
-    add("Client Name", data.client_name)
-    add("Customer", data.customer)
-    add("Contractor", data.contractor)
-    add("Nature", data.nature)
-    add("Purpose", data.purpose)
-    add("Created On", data.created_on)
-    add("Created By", data.created_by)
+    add("Client Name", client_name)
+    add("Customer", customer)
+    add("Contractor", contractor)
+    add("Nature", nature)
+    add("Purpose", purpose)
+    add("Created On", created_on)
+    add("Created By", created_by)
 
-    tmp_dir = tempfile.gettempdir()
-    file_path = os.path.join(tmp_dir, "cover_page.docx")
-    doc.save(file_path)
+    # Page break
+    cover.add_page_break()
+
+    # --- Append uploaded document ---
+    original = Document(uploaded_path)
+    for element in original.element.body:
+        cover.element.body.append(element)
+
+    final_path = os.path.join(temp_dir, "final_document.docx")
+    cover.save(final_path)
 
     return FileResponse(
-        path=file_path,
+        final_path,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename="cover_page.docx"
+        filename="Document_With_Cover.docx"
     )
