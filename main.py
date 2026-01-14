@@ -1,66 +1,69 @@
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import Response
+from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from docx import Document
 import io
-import oracledb
+import requests
 
 app = FastAPI()
 
-# ---- Oracle connection ----
-conn = oracledb.connect(
-    user="YOUR_DB_USER",
-    password="YOUR_DB_PASSWORD",
-    dsn="YOUR_DB_DSN"
-)
+# ---------- INPUT MODEL ----------
+class DownloadRequest(BaseModel):
+    document_id: int
+    client_name: str | None = None
+    customer: str | None = None
+    contractor: str | None = None
+    nature: str | None = None
+    purpose: str | None = None
+    created_on: str | None = None
+    created_by: str | None = None
 
+
+# ---------- FETCH FILE FROM APEX ----------
+def fetch_original_doc(document_id: int) -> bytes:
+    """
+    Call APEX ORDS / download API to fetch original Word file
+    """
+    url = f"https://YOUR_APEX_HOST/ords/your_schema/documents/{document_id}"
+
+    r = requests.get(url)
+    r.raise_for_status()
+    return r.content
+
+
+# ---------- API ----------
 @app.post("/download-doc")
-async def download_doc(request: Request):
+def download_doc(data: DownloadRequest):
 
-    data = await request.json()  # <-- THIS WAS MISSING
+    # 1️⃣ Fetch original Word document
+    original_bytes = fetch_original_doc(data.document_id)
+    original_doc = Document(io.BytesIO(original_bytes))
 
-    document_id = data.get("document_id")
-    if not document_id:
-        raise HTTPException(status_code=400, detail="document_id missing")
-
-    # ---- Fetch Word file from DB ----
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT file_blob
-        FROM dms_documents
-        WHERE document_id = :id
-    """, id=document_id)
-
-    row = cur.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Document not found")
-
-    original_doc = Document(io.BytesIO(row[0].read()))
-
-    # ---- Create cover page ----
+    # 2️⃣ Create cover page
     cover = Document()
     cover.add_heading("Document Details", level=1)
 
-    cover.add_paragraph(f"Client Name : {data.get('client_name','')}")
-    cover.add_paragraph(f"Customer    : {data.get('customer','')}")
-    cover.add_paragraph(f"Contractor  : {data.get('contractor','')}")
-    cover.add_paragraph(f"Nature      : {data.get('nature','')}")
-    cover.add_paragraph(f"Purpose     : {data.get('purpose','')}")
-    cover.add_paragraph(f"Created On  : {data.get('created_on','')}")
-    cover.add_paragraph(f"Created By  : {data.get('created_by','')}")
+    cover.add_paragraph(f"Client Name : {data.client_name}")
+    cover.add_paragraph(f"Customer    : {data.customer}")
+    cover.add_paragraph(f"Contractor  : {data.contractor}")
+    cover.add_paragraph(f"Nature      : {data.nature}")
+    cover.add_paragraph(f"Purpose     : {data.purpose}")
+    cover.add_paragraph(f"Created On  : {data.created_on}")
+    cover.add_paragraph(f"Created By  : {data.created_by}")
 
     cover.add_page_break()
 
-    # ---- Append original content ----
+    # 3️⃣ Merge original document into cover
     for element in original_doc.element.body:
         cover.element.body.append(element)
 
-    # ---- Return combined DOCX ----
-    out = io.BytesIO()
-    cover.save(out)
-    out.seek(0)
+    # 4️⃣ Return final Word
+    output = io.BytesIO()
+    cover.save(output)
+    output.seek(0)
 
-    return Response(
-        content=out.read(),
+    return StreamingResponse(
+        output,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={
             "Content-Disposition": "attachment; filename=Document_With_Cover.docx"
