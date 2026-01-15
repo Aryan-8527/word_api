@@ -2,11 +2,9 @@ from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from docx import Document
 from pptx import Presentation
-from pptx.util import Inches
 import tempfile, os, shutil
 
 app = FastAPI()
-
 
 @app.post("/download-doc")
 async def download_doc(
@@ -29,87 +27,77 @@ async def download_doc(
     ext = os.path.splitext(file.filename)[1].lower()
     out_path = os.path.join(temp_dir, file.filename)
 
-    # =====================================================
-    # ================= WORD ==============================
-    # =====================================================
+    # ================= WORD =================
     if ext == ".docx":
         src = Document(src_path)
         out = Document()
 
-        # Copy ALL paragraphs first (Word decides pages)
+        # copy original content (format safe)
         for p in src.paragraphs:
-            out.add_paragraph(p.text)
+            new_p = out.add_paragraph(p.text)
+            new_p.style = p.style
 
-        # Insert form details AFTER first logical section
+        # insert details as new section
         out.add_page_break()
         out.add_heading("Document Details", level=1)
 
-        def add(label, val):
-            out.add_paragraph(f"{label}: {val}")
+        fields = [
+            ("Document Code", document_code),
+            ("Client Name", client_name),
+            ("Customer", customer),
+            ("Contractor", contractor),
+            ("Nature", nature),
+            ("Purpose", purpose),
+            ("Created On", created_on),
+            ("Created By", created_by),
+        ]
 
-        add("Document Code", document_code)
-        add("Client Name", client_name)
-        add("Customer", customer)
-        add("Contractor", contractor)
-        add("Nature", nature)
-        add("Purpose", purpose)
-        add("Created On", created_on)
-        add("Created By", created_by)
+        for k, v in fields:
+            out.add_paragraph(f"{k}: {v}")
 
         out.save(out_path)
 
-    # =====================================================
-    # ================= PPT ===============================
-    # =====================================================
+    # ================= PPT =================
     elif ext == ".pptx":
         src = Presentation(src_path)
         out = Presentation()
 
-        # Remove default slide
+        # remove default slide
         while out.slides:
             out.slides._sldIdLst.remove(out.slides._sldIdLst[0])
 
-        # Slide 1 → Original slide 1
-        slide = src.slides[0]
-        new_slide = out.slides.add_slide(out.slide_layouts[6])
-
-        for shape in slide.shapes:
-            if shape.has_text_frame:
-                textbox = new_slide.shapes.add_textbox(
-                    shape.left, shape.top, shape.width, shape.height
+        # slide 1
+        s = src.slides[0]
+        slide = out.slides.add_slide(out.slide_layouts[6])
+        for sh in s.shapes:
+            if sh.has_text_frame:
+                box = slide.shapes.add_textbox(
+                    sh.left, sh.top, sh.width, sh.height
                 )
-                textbox.text_frame.text = shape.text
+                box.text_frame.text = sh.text
 
-        # Slide 2 → Form details
-        details = out.slides.add_slide(out.slide_layouts[1])
-        details.shapes.title.text = "Document Details"
-
-        tf = details.placeholders[1].text_frame
-        tf.text = (
-            f"Document Code: {document_code}\n"
-            f"Client Name: {client_name}\n"
-            f"Customer: {customer}\n"
-            f"Contractor: {contractor}\n"
-            f"Nature: {nature}\n"
-            f"Purpose: {purpose}\n"
-            f"Created On: {created_on}\n"
-            f"Created By: {created_by}"
+        # slide 2 (details)
+        d = out.slides.add_slide(out.slide_layouts[1])
+        d.shapes.title.text = "Document Details"
+        tf = d.placeholders[1].text_frame
+        tf.text = "\n".join(
+            f"{k}: {v}" for k, v in fields
         )
 
-        # Remaining slides
-        for slide in src.slides[1:]:
-            new_slide = out.slides.add_slide(out.slide_layouts[6])
-            for shape in slide.shapes:
-                if shape.has_text_frame:
-                    textbox = new_slide.shapes.add_textbox(
-                        shape.left, shape.top, shape.width, shape.height
+        # remaining slides
+        for s in src.slides[1:]:
+            slide = out.slides.add_slide(out.slide_layouts[6])
+            for sh in s.shapes:
+                if sh.has_text_frame:
+                    box = slide.shapes.add_textbox(
+                        sh.left, sh.top, sh.width, sh.height
                     )
-                    textbox.text_frame.text = shape.text
+                    box.text_frame.text = sh.text
 
         out.save(out_path)
 
     else:
-        return {"error": "Unsupported file type"}
+        raise Exception("Unsupported file type")
 
     return FileResponse(
         out_path,
