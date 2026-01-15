@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from docx import Document
-from docx.text.paragraph import Paragraph
+from pptx import Presentation
 import tempfile, os, shutil
 
 app = FastAPI()
@@ -24,50 +24,93 @@ async def download_doc(
     with open(uploaded_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    original = Document(uploaded_path)
-    final_doc = Document()
+    ext = os.path.splitext(file.filename)[1].lower()
 
-    # ---------- PAGE 1: Original first page ----------
-    page_break_found = False
-    remaining_paragraphs = []
+    # ================= WORD =================
+    if ext == ".docx":
+        original = Document(uploaded_path)
+        final_doc = Document()
 
-    for para in original.paragraphs:
-        if not page_break_found:
-            final_doc.add_paragraph(para.text, style=para.style)
-            for run in para.runs:
-                if run._element.xpath(".//w:br[@w:type='page']"):
-                    page_break_found = True
-        else:
-            remaining_paragraphs.append(para)
+        # Page 1: original first page
+        for el in original.element.body:
+            final_doc.element.body.append(el)
+            if el.tag.endswith("sectPr"):
+                break
 
-    # ---------- PAGE 2: Form Details ----------
-    final_doc.add_page_break()
-    final_doc.add_heading("Document Details", level=1)
+        final_doc.add_page_break()
 
-    def add(label, value):
-        final_doc.add_paragraph(f"{label}: {value or ''}")
+        # Page 2: form details
+        final_doc.add_heading("Document Details", level=1)
 
-    add("Document Code", document_code)
-    add("Client Name", client_name)
-    add("Customer", customer)
-    add("Contractor", contractor)
-    add("Nature", nature)
-    add("Purpose", purpose)
-    add("Created On", created_on)
-    add("Created By", created_by)
+        def add(label, val):
+            final_doc.add_paragraph(f"{label}: {val or ''}")
 
-    # ---------- PAGE 3+: Remaining original pages ----------
-    final_doc.add_page_break()
-    for para in remaining_paragraphs:
-        final_doc.add_paragraph(para.text, style=para.style)
+        add("Document Code", document_code)
+        add("Client Name", client_name)
+        add("Customer", customer)
+        add("Contractor", contractor)
+        add("Nature", nature)
+        add("Purpose", purpose)
+        add("Created On", created_on)
+        add("Created By", created_by)
 
-    final_path = os.path.join(temp_dir, file.filename)
-    final_doc.save(final_path)
+        final_doc.add_page_break()
+
+        # Remaining pages
+        remaining = False
+        for el in original.element.body:
+            if remaining:
+                final_doc.element.body.append(el)
+            if el.tag.endswith("sectPr"):
+                remaining = True
+
+        final_path = os.path.join(temp_dir, file.filename)
+        final_doc.save(final_path)
+
+    # ================= PPT =================
+    elif ext == ".pptx":
+        original = Presentation(uploaded_path)
+        final_ppt = Presentation()
+
+        # Copy slide 1
+        final_ppt.slides.add_slide(original.slides[0].slide_layout)
+        final_ppt.slides[-1]._element.extend(original.slides[0]._element)
+
+        # Insert details slide (slide 2)
+        slide = final_ppt.slides.add_slide(final_ppt.slide_layouts[1])
+        slide.shapes.title.text = "Document Details"
+
+        content = slide.placeholders[1].text_frame
+        content.clear()
+
+        def add(text):
+            p = content.add_paragraph()
+            p.text = text
+
+        add(f"Document Code: {document_code}")
+        add(f"Client Name: {client_name}")
+        add(f"Customer: {customer}")
+        add(f"Contractor: {contractor}")
+        add(f"Nature: {nature}")
+        add(f"Purpose: {purpose}")
+        add(f"Created On: {created_on}")
+        add(f"Created By: {created_by}")
+
+        # Remaining slides
+        for i in range(1, len(original.slides)):
+            s = original.slides[i]
+            final_ppt.slides.add_slide(s.slide_layout)
+            final_ppt.slides[-1]._element.extend(s._element)
+
+        final_path = os.path.join(temp_dir, file.filename)
+        final_ppt.save(final_path)
+
+    # ================= OTHER FILES =================
+    else:
+        final_path = uploaded_path
 
     return FileResponse(
         final_path,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={
-            "Content-Disposition": f'attachment; filename="{file.filename}"'
-        }
+        filename=file.filename,
+        media_type=file.content_type
     )
