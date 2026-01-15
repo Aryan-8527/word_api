@@ -2,7 +2,6 @@ from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from docx import Document
 from pptx import Presentation
-from pptx.enum.text import PP_ALIGN
 import tempfile, os, shutil
 
 app = FastAPI()
@@ -30,7 +29,7 @@ def copy_textbox_safe(src_shape, dst_slide):
             new_r.font.bold = r.font.bold
             new_r.font.italic = r.font.italic
             new_r.font.underline = r.font.underline
-            # DO NOT copy color (causes corruption)
+            # DO NOT copy color
 
 
 @app.post("/download-doc")
@@ -54,60 +53,54 @@ async def download_doc(
     ext = os.path.splitext(file.filename)[1].lower()
 
     # =====================================================
-# ================= WORD (.DOCX) ======================
-# =====================================================
-if ext == ".docx":
-    src = Document(input_path)
-    out = Document()
+    # ================= WORD (.DOCX) ======================
+    # =====================================================
+    if ext == ".docx":
+        src = Document(input_path)
+        out = Document()
 
-    page_1 = []
-    page_rest = []
-    first_page_done = False
+        page_1 = []
+        page_rest = []
+        first_page_done = False
 
-    # --- SAFE page split using XML page-break detection ---
-    for para in src.paragraphs:
-        text = para.text
+        for para in src.paragraphs:
+            if not first_page_done:
+                page_1.append(para.text)
+            else:
+                page_rest.append(para.text)
 
-        if not first_page_done:
-            page_1.append(text)
-        else:
-            page_rest.append(text)
+            if para._p.xpath(".//w:br[@w:type='page']"):
+                first_page_done = True
 
-        # Detect PAGE BREAK safely
-        if para._p.xpath(".//w:br[@w:type='page']"):
-            first_page_done = True
+        # Page 1
+        for line in page_1:
+            out.add_paragraph(line)
 
-    # -------- Page 1 (Original) --------
-    for line in page_1:
-        out.add_paragraph(line)
+        out.add_page_break()
 
-    out.add_page_break()
+        # Page 2 – Document Details
+        out.add_heading("Document Details", level=1)
 
-    # -------- Page 2 (Document Details) --------
-    out.add_heading("Document Details", level=1)
+        def add(label, val):
+            out.add_paragraph(f"{label}: {val}")
 
-    def add(label, val):
-        out.add_paragraph(f"{label}: {val}")
+        add("Document Code", document_code)
+        add("Client Name", client_name)
+        add("Customer", customer)
+        add("Contractor", contractor)
+        add("Nature", nature)
+        add("Purpose", purpose)
+        add("Created On", created_on)
+        add("Created By", created_by)
 
-    add("Document Code", document_code)
-    add("Client Name", client_name)
-    add("Customer", customer)
-    add("Contractor", contractor)
-    add("Nature", nature)
-    add("Purpose", purpose)
-    add("Created On", created_on)
-    add("Created By", created_by)
+        out.add_page_break()
 
-    out.add_page_break()
+        # Remaining pages
+        for line in page_rest:
+            out.add_paragraph(line)
 
-    # -------- Remaining Original Pages --------
-    for line in page_rest:
-        out.add_paragraph(line)
-
-    output_path = os.path.join(temp_dir, file.filename)
-    out.save(output_path)
-
-
+        output_path = os.path.join(temp_dir, file.filename)
+        out.save(output_path)
 
     # =====================================================
     # ================= PPT (.PPTX) =======================
@@ -118,13 +111,13 @@ if ext == ".docx":
 
         blank = out.slide_layouts[6]
 
-        # ---- SLIDE 1 ----
+        # Slide 1
         s1 = out.slides.add_slide(blank)
         for shp in src.slides[0].shapes:
             if shp.has_text_frame:
                 copy_textbox_safe(shp, s1)
 
-        # ---- FORM SLIDE ----
+        # Slide 2 – Document Details
         s2 = out.slides.add_slide(out.slide_layouts[1])
         s2.shapes.title.text = "Document Details"
         tf = s2.placeholders[1].text_frame
@@ -138,12 +131,12 @@ if ext == ".docx":
             f"Nature: {nature}",
             f"Purpose: {purpose}",
             f"Created On: {created_on}",
-            f"Created By: {created_by}"
+            f"Created By: {created_by}",
         ]:
             p = tf.add_paragraph()
             p.text = text
 
-        # ---- REMAINING SLIDES ----
+        # Remaining slides
         for i in range(1, len(src.slides)):
             s = out.slides.add_slide(blank)
             for shp in src.slides[i].shapes:
@@ -162,6 +155,3 @@ if ext == ".docx":
             "Content-Disposition": f'attachment; filename="{file.filename}"'
         }
     )
-
-
-
