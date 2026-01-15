@@ -53,59 +53,59 @@ async def download_doc(
 
     ext = os.path.splitext(file.filename)[1].lower()
 
-       # =====================================================
-    # ================= WORD (.DOCX) ======================
     # =====================================================
-    if ext == ".docx":
-        src = Document(input_path)
-        out = Document()
+# ================= WORD (.DOCX) ======================
+# =====================================================
+if ext == ".docx":
+    src = Document(input_path)
+    out = Document()
 
-        pages = []
-        current_page = []
+    page_1 = []
+    page_rest = []
+    first_page_done = False
 
-        # Split original document into pages
-        for para in src.paragraphs:
-            current_page.append(para.text)
+    # --- SAFE page split using XML page-break detection ---
+    for para in src.paragraphs:
+        text = para.text
 
-            for run in para.runs:
-                if run.break_type == 1:  # PAGE BREAK
-                    pages.append(current_page)
-                    current_page = []
+        if not first_page_done:
+            page_1.append(text)
+        else:
+            page_rest.append(text)
 
-        if current_page:
-            pages.append(current_page)
+        # Detect PAGE BREAK safely
+        if para._p.xpath(".//w:br[@w:type='page']"):
+            first_page_done = True
 
-        # Page 1 - original
-        for line in pages[0]:
-            out.add_paragraph(line)
+    # -------- Page 1 (Original) --------
+    for line in page_1:
+        out.add_paragraph(line)
 
-        out.add_page_break()
+    out.add_page_break()
 
-        # Page 2 - document details
-        out.add_heading("Document Details", level=1)
+    # -------- Page 2 (Document Details) --------
+    out.add_heading("Document Details", level=1)
 
-        def add(label, val):
-            out.add_paragraph(f"{label}: {val}")
+    def add(label, val):
+        out.add_paragraph(f"{label}: {val}")
 
-        add("Document Code", document_code)
-        add("Client Name", client_name)
-        add("Customer", customer)
-        add("Contractor", contractor)
-        add("Nature", nature)
-        add("Purpose", purpose)
-        add("Created On", created_on)
-        add("Created By", created_by)
+    add("Document Code", document_code)
+    add("Client Name", client_name)
+    add("Customer", customer)
+    add("Contractor", contractor)
+    add("Nature", nature)
+    add("Purpose", purpose)
+    add("Created On", created_on)
+    add("Created By", created_by)
 
-        out.add_page_break()
+    out.add_page_break()
 
-        # Remaining pages
-        for page in pages[1:]:
-            for line in page:
-                out.add_paragraph(line)
-            out.add_page_break()
+    # -------- Remaining Original Pages --------
+    for line in page_rest:
+        out.add_paragraph(line)
 
-        output_path = os.path.join(temp_dir, file.filename)
-        out.save(output_path)
+    output_path = os.path.join(temp_dir, file.filename)
+    out.save(output_path)
 
 
 
@@ -162,5 +162,6 @@ async def download_doc(
             "Content-Disposition": f'attachment; filename="{file.filename}"'
         }
     )
+
 
 
