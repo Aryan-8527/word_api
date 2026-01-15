@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from docx import Document
-from docx.oxml.ns import qn
+from docx.text.paragraph import Paragraph
 import tempfile, os, shutil
 
 app = FastAPI()
@@ -19,28 +19,29 @@ async def download_doc(
     created_by: str = Form(None),
 ):
     temp_dir = tempfile.mkdtemp()
-
     uploaded_path = os.path.join(temp_dir, file.filename)
+
     with open(uploaded_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
     original = Document(uploaded_path)
     final_doc = Document()
 
-    # 🔥 REMOVE DEFAULT BLANK PAGE
-    final_doc._body.clear_content()
+    # ---------- PAGE 1: Original first page ----------
+    page_break_found = False
+    remaining_paragraphs = []
 
-    # ---------- PAGE 1 (Original first page) ----------
-    first_page_done = False
-    for element in original.element.body:
-        final_doc.element.body.append(element)
-        if element.tag.endswith('br') and element.get(qn('w:type')) == 'page':
-            first_page_done = True
-            break
+    for para in original.paragraphs:
+        if not page_break_found:
+            final_doc.add_paragraph(para.text, style=para.style)
+            for run in para.runs:
+                if run._element.xpath(".//w:br[@w:type='page']"):
+                    page_break_found = True
+        else:
+            remaining_paragraphs.append(para)
 
+    # ---------- PAGE 2: Form Details ----------
     final_doc.add_page_break()
-
-    # ---------- PAGE 2 (Form details) ----------
     final_doc.add_heading("Document Details", level=1)
 
     def add(label, value):
@@ -55,15 +56,10 @@ async def download_doc(
     add("Created On", created_on)
     add("Created By", created_by)
 
+    # ---------- PAGE 3+: Remaining original pages ----------
     final_doc.add_page_break()
-
-    # ---------- PAGE 3+ (Remaining original pages) ----------
-    remaining = False
-    for element in original.element.body:
-        if remaining:
-            final_doc.element.body.append(element)
-        if element.tag.endswith('br') and element.get(qn('w:type')) == 'page':
-            remaining = True
+    for para in remaining_paragraphs:
+        final_doc.add_paragraph(para.text, style=para.style)
 
     final_path = os.path.join(temp_dir, file.filename)
     final_doc.save(final_path)
