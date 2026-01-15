@@ -57,45 +57,56 @@ async def download_doc(
     # ================= WORD (.DOCX) ======================
     # =====================================================
     if ext == ".docx":
-        src = Document(input_path)
-        out = Document()
+    src = Document(input_path)
+    out = Document()
 
-        # ---- PAGE 1 (original) ----
-        for el in src.element.body:
-            out.element.body.append(el)
+    pages = []
+    current_page = []
 
-            # stop after first page break
-            if el.tag.endswith("p") and el.xpath(".//w:br[@w:type='page']"):
-                break
+    # -------- SPLIT ORIGINAL DOC INTO PAGES --------
+    for para in src.paragraphs:
+        current_page.append(para.text)
 
-        # ---- FORM PAGE ----
-        out.add_heading("Document Details", level=1)
+        for run in para.runs:
+            if run.break_type == 1:  # PAGE BREAK
+                pages.append(current_page)
+                current_page = []
 
-        def add(label, val):
-            out.add_paragraph(f"{label}: {val}")
+    if current_page:
+        pages.append(current_page)
 
-        add("Document Code", document_code)
-        add("Client Name", client_name)
-        add("Customer", customer)
-        add("Contractor", contractor)
-        add("Nature", nature)
-        add("Purpose", purpose)
-        add("Created On", created_on)
-        add("Created By", created_by)
+    # -------- PAGE 1 (ORIGINAL) --------
+    for line in pages[0]:
+        out.add_paragraph(line)
 
+    out.add_page_break()
+
+    # -------- PAGE 2 (DOCUMENT DETAILS) --------
+    out.add_heading("Document Details", level=1)
+
+    def add(label, val):
+        out.add_paragraph(f"{label}: {val}")
+
+    add("Document Code", document_code)
+    add("Client Name", client_name)
+    add("Customer", customer)
+    add("Contractor", contractor)
+    add("Nature", nature)
+    add("Purpose", purpose)
+    add("Created On", created_on)
+    add("Created By", created_by)
+
+    out.add_page_break()
+
+    # -------- PAGE 3+ (REMAINING ORIGINAL PAGES) --------
+    for page in pages[1:]:
+        for line in page:
+            out.add_paragraph(line)
         out.add_page_break()
 
-        # ---- REMAINING ORIGINAL PAGES ----
-        skip = True
-        for el in src.element.body:
-            if skip:
-                if el.tag.endswith("p") and el.xpath(".//w:br[@w:type='page']"):
-                    skip = False
-                continue
-            out.element.body.append(el)
+    output_path = os.path.join(temp_dir, file.filename)
+    out.save(output_path)
 
-        output_path = os.path.join(temp_dir, file.filename)
-        out.save(output_path)
 
     # =====================================================
     # ================= PPT (.PPTX) =======================
@@ -150,3 +161,4 @@ async def download_doc(
             "Content-Disposition": f'attachment; filename="{file.filename}"'
         }
     )
+
