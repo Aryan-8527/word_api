@@ -10,6 +10,7 @@ app = FastAPI()
 @app.post("/download-doc")
 async def download_doc(
     file: UploadFile = File(...),
+    document_code: str = Form(None),  
     client_name: str = Form(None),
     customer: str = Form(None),
     contractor: str = Form(None),
@@ -31,6 +32,7 @@ async def download_doc(
     def add(label, value):
         cover.add_paragraph(f"{label} : {value if value else 'None'}")
 
+    add("Document Code", document_code) 
     add("Client Name", client_name)
     add("Customer", customer)
     add("Contractor", contractor)
@@ -55,3 +57,4 @@ async def download_doc(
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename="Document_With_Cover.docx"
     )
+
