@@ -6,6 +6,33 @@ import tempfile, os, shutil
 
 app = FastAPI()
 
+# =========================
+# PPT HELPER (KEEP FORMATTING)
+# =========================
+def copy_textbox(src_shape, dst_slide):
+    tb = dst_slide.shapes.add_textbox(
+        src_shape.left, src_shape.top,
+        src_shape.width, src_shape.height
+    )
+    tf = tb.text_frame
+    tf.clear()
+
+    for p in src_shape.text_frame.paragraphs:
+        new_p = tf.add_paragraph()
+        new_p.alignment = p.alignment
+
+        for r in p.runs:
+            new_r = new_p.add_run()
+            new_r.text = r.text
+            new_r.font.name = r.font.name
+            new_r.font.size = r.font.size
+            new_r.font.bold = r.font.bold
+            new_r.font.italic = r.font.italic
+            new_r.font.underline = r.font.underline
+            if r.font.color.rgb:
+                new_r.font.color.rgb = r.font.color.rgb
+
+
 @app.post("/download-doc")
 async def download_doc(
     file: UploadFile = File(...),
@@ -30,23 +57,25 @@ async def download_doc(
     # ================= WORD (.DOCX) ======================
     # =====================================================
     if ext == ".docx":
-        original = Document(input_path)
-        result = Document(input_path)   # reuse original to avoid blank page
-
+        result = Document(input_path)
         body = result.element.body
 
-        # Find page break index
-        page_break_index = None
+        # Find end of page 1
+        insert_pos = None
         for i, el in enumerate(body):
             if el.tag.endswith("p") and el.xpath(".//w:br[@w:type='page']"):
-                page_break_index = i
+                insert_pos = i + 1
                 break
 
-        # Insert form page after page 1
-        insert_pos = page_break_index + 1 if page_break_index else len(body)
+        if insert_pos is None:
+            insert_pos = len(body)
 
+        # Add ONE page break
+        page_break = result.add_page_break()._element
+        body.insert(insert_pos, page_break)
+
+        # Form page content (NO page break here)
         form_doc = Document()
-        form_doc.add_page_break()
         form_doc.add_heading("Document Details", level=1)
 
         def add(label, val):
@@ -61,8 +90,9 @@ async def download_doc(
         add("Created On", created_on)
         add("Created By", created_by)
 
+        # Insert form content
         for el in reversed(form_doc.element.body):
-            body.insert(insert_pos, el)
+            body.insert(insert_pos + 1, el)
 
         output_path = os.path.join(temp_dir, file.filename)
         result.save(output_path)
@@ -74,16 +104,15 @@ async def download_doc(
         src = Presentation(input_path)
         out = Presentation()
 
+        blank_layout = out.slide_layouts[6]
+
         # Slide 1: original slide 1
-        layout = out.slide_layouts[6]
-        s1 = out.slides.add_slide(layout)
+        s1 = out.slides.add_slide(blank_layout)
         for shp in src.slides[0].shapes:
             if shp.has_text_frame:
-                s1.shapes.add_textbox(
-                    shp.left, shp.top, shp.width, shp.height
-                ).text_frame.text = shp.text
+                copy_textbox(shp, s1)
 
-        # Slide 2: form details
+        # Slide 2: Document Details
         s2 = out.slides.add_slide(out.slide_layouts[1])
         s2.shapes.title.text = "Document Details"
         tf = s2.placeholders[1].text_frame
@@ -102,14 +131,12 @@ async def download_doc(
         add_ppt(f"Created On: {created_on}")
         add_ppt(f"Created By: {created_by}")
 
-        # Remaining slides
+        # Remaining original slides
         for i in range(1, len(src.slides)):
-            s = out.slides.add_slide(layout)
+            s = out.slides.add_slide(blank_layout)
             for shp in src.slides[i].shapes:
                 if shp.has_text_frame:
-                    s.shapes.add_textbox(
-                        shp.left, shp.top, shp.width, shp.height
-                    ).text_frame.text = shp.text
+                    copy_textbox(shp, s)
 
         output_path = os.path.join(temp_dir, file.filename)
         out.save(output_path)
@@ -120,5 +147,7 @@ async def download_doc(
     return FileResponse(
         output_path,
         media_type=file.content_type,
-        headers={"Content-Disposition": f'attachment; filename="{file.filename}"'}
+        headers={
+            "Content-Disposition": f'attachment; filename="{file.filename}"'
+        }
     )
