@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from docx import Document
+from docx.oxml.ns import qn
 import tempfile, os, shutil
 
 app = FastAPI()
@@ -26,11 +27,16 @@ async def download_doc(
     original = Document(uploaded_path)
     final_doc = Document()
 
-    # ---------- PAGE 1 (Original first page only) ----------
+    # 🔥 REMOVE DEFAULT BLANK PAGE
+    final_doc._body.clear_content()
+
+    # ---------- PAGE 1 (Original first page) ----------
+    first_page_done = False
     for element in original.element.body:
         final_doc.element.body.append(element)
-        if element.tag.endswith('sectPr'):
-            break  # stop after first page
+        if element.tag.endswith('br') and element.get(qn('w:type')) == 'page':
+            first_page_done = True
+            break
 
     final_doc.add_page_break()
 
@@ -56,7 +62,7 @@ async def download_doc(
     for element in original.element.body:
         if remaining:
             final_doc.element.body.append(element)
-        if element.tag.endswith('sectPr'):
+        if element.tag.endswith('br') and element.get(qn('w:type')) == 'page':
             remaining = True
 
     final_path = os.path.join(temp_dir, file.filename)
