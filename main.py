@@ -2,118 +2,136 @@ from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from docx import Document
 from pptx import Presentation
+from copy import deepcopy
 import tempfile, os, shutil
 
 app = FastAPI()
 
+
+# ---------- PPT HELPER (SAFE COPY) ----------
+def copy_slide(prs, source_slide):
+    slide_layout = prs.slide_layouts[6]  # blank
+    new_slide = prs.slides.add_slide(slide_layout)
+
+    for shape in source_slide.shapes:
+        el = deepcopy(shape.element)
+        new_slide.shapes._spTree.insert_element_before(el, 'p:extLst')
+
+    return new_slide
+
+
 @app.post("/download-doc")
 async def download_doc(
     file: UploadFile = File(...),
-    document_code: str = Form(""),
-    client_name: str = Form(""),
-    customer: str = Form(""),
-    contractor: str = Form(""),
-    nature: str = Form(""),
-    purpose: str = Form(""),
-    created_on: str = Form(""),
-    created_by: str = Form(""),
+    document_code: str = Form(None),
+    client_name: str = Form(None),
+    customer: str = Form(None),
+    contractor: str = Form(None),
+    nature: str = Form(None),
+    purpose: str = Form(None),
+    created_on: str = Form(None),
+    created_by: str = Form(None),
 ):
     temp_dir = tempfile.mkdtemp()
-    input_path = os.path.join(temp_dir, file.filename)
+    uploaded_path = os.path.join(temp_dir, file.filename)
 
-    with open(input_path, "wb") as f:
+    # Save uploaded file
+    with open(uploaded_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    ext = file.filename.lower().split(".")[-1]
+    filename = file.filename
+    ext = os.path.splitext(filename)[1].lower()
 
-    # ===================== WORD =====================
-    if ext == "docx":
-        original = Document(input_path)
+    # ======================================================
+    # ================= WORD (.DOCX) =======================
+    # ======================================================
+    if ext == ".docx":
+        original = Document(uploaded_path)
         final_doc = Document()
 
-        # Page 1 (original first page)
-        for el in original.element.body:
-            final_doc.element.body.append(el)
-            if el.tag.endswith("sectPr"):
+        # --- PAGE 1: original first page ---
+        for element in original.element.body:
+            final_doc.element.body.append(deepcopy(element))
+            if element.tag.endswith('sectPr'):
                 break
 
         final_doc.add_page_break()
 
-        # Page 2 (details)
+        # --- PAGE 2: form details ---
         final_doc.add_heading("Document Details", level=1)
-        fields = [
-            ("Document Code", document_code),
-            ("Client Name", client_name),
-            ("Customer", customer),
-            ("Contractor", contractor),
-            ("Nature", nature),
-            ("Purpose", purpose),
-            ("Created On", created_on),
-            ("Created By", created_by),
-        ]
-        for k, v in fields:
-            final_doc.add_paragraph(f"{k}: {v}")
+
+        def add(label, value):
+            final_doc.add_paragraph(f"{label}: {value or ''}")
+
+        add("Document Code", document_code)
+        add("Client Name", client_name)
+        add("Customer", customer)
+        add("Contractor", contractor)
+        add("Nature", nature)
+        add("Purpose", purpose)
+        add("Created On", created_on)
+        add("Created By", created_by)
 
         final_doc.add_page_break()
 
-        # Remaining pages
+        # --- Remaining pages ---
         remaining = False
-        for el in original.element.body:
+        for element in original.element.body:
             if remaining:
-                final_doc.element.body.append(el)
-            if el.tag.endswith("sectPr"):
+                final_doc.element.body.append(deepcopy(element))
+            if element.tag.endswith('sectPr'):
                 remaining = True
 
-        output_path = os.path.join(temp_dir, file.filename)
-        final_doc.save(output_path)
+        final_path = os.path.join(temp_dir, filename)
+        final_doc.save(final_path)
 
-    # ===================== POWERPOINT =====================
-    elif ext == "pptx":
-        original = Presentation(input_path)
+    # ======================================================
+    # ================= PPT (.PPTX) ========================
+    # ======================================================
+    elif ext == ".pptx":
+        original = Presentation(uploaded_path)
         final_ppt = Presentation()
 
-        # Copy slide layouts
-        def copy_slide(slide):
-            layout = final_ppt.slide_layouts[slide.slide_layout.slide_layout_id]
-            new_slide = final_ppt.slides.add_slide(layout)
-            for shape in slide.shapes:
-                if shape.has_text_frame:
-                    new_slide.shapes.title.text = shape.text
+        # Slide 1: original first slide
+        copy_slide(final_ppt, original.slides[0])
 
-        # Slide 1
-        copy_slide(original.slides[0])
+        # Slide 2: form details
+        details_slide = final_ppt.slides.add_slide(final_ppt.slide_layouts[1])
+        details_slide.shapes.title.text = "Document Details"
 
-        # Slide 2 – Details
-        detail_slide = final_ppt.slides.add_slide(final_ppt.slide_layouts[1])
-        detail_slide.shapes.title.text = "Document Details"
-        body = detail_slide.placeholders[1].text_frame
-        body.clear()
+        tf = details_slide.placeholders[1].text_frame
+        tf.clear()
 
-        fields = [
-            ("Document Code", document_code),
-            ("Client Name", client_name),
-            ("Customer", customer),
-            ("Contractor", contractor),
-            ("Nature", nature),
-            ("Purpose", purpose),
-            ("Created On", created_on),
-            ("Created By", created_by),
-        ]
-        for k, v in fields:
-            body.add_paragraph().text = f"{k}: {v}"
+        def add_ppt(text):
+            p = tf.add_paragraph()
+            p.text = text
+
+        add_ppt(f"Document Code: {document_code}")
+        add_ppt(f"Client Name: {client_name}")
+        add_ppt(f"Customer: {customer}")
+        add_ppt(f"Contractor: {contractor}")
+        add_ppt(f"Nature: {nature}")
+        add_ppt(f"Purpose: {purpose}")
+        add_ppt(f"Created On: {created_on}")
+        add_ppt(f"Created By: {created_by}")
 
         # Remaining slides
         for i in range(1, len(original.slides)):
-            copy_slide(original.slides[i])
+            copy_slide(final_ppt, original.slides[i])
 
-        output_path = os.path.join(temp_dir, file.filename)
-        final_ppt.save(output_path)
+        final_path = os.path.join(temp_dir, filename)
+        final_ppt.save(final_path)
 
     else:
         raise Exception("Unsupported file type")
 
+    # ======================================================
+    # ================= RESPONSE ===========================
+    # ======================================================
     return FileResponse(
-        output_path,
+        final_path,
         media_type=file.content_type,
-        headers={"Content-Disposition": f'attachment; filename="{file.filename}"'}
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        }
     )
