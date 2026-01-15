@@ -49,12 +49,22 @@ async def download_doc(
     for element in original.element.body:
         cover.element.body.append(element)
 
-    final_path = os.path.join(temp_dir, "final_document.docx")
+    # final_path = os.path.join(temp_dir, "final_document.docx")
+    final_filename = file.filename  # keep original name
+    final_path = os.path.join(temp_dir, final_filename)
     cover.save(final_path)
 
-    return FileResponse(
-        final_path,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename="Document_With_Cover.docx"
-    )
+    # return FileResponse(
+    #     final_path,
+    #     media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    #     filename="Document_With_Cover.docx"
+    # )
+
+return FileResponse(
+    final_path,
+    media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    filename=final_filename
+)
+
+
 
