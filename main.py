@@ -19,19 +19,26 @@ async def download_doc(
 ):
     temp_dir = tempfile.mkdtemp()
 
-    # Save uploaded file
     uploaded_path = os.path.join(temp_dir, file.filename)
     with open(uploaded_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
     original = Document(uploaded_path)
+    final_doc = Document()
 
-    # -------- PAGE 2 (FORM DETAILS) ----------
-    details = Document()
-    details.add_heading("Document Details", level=1)
+    # ---------- PAGE 1 (Original first page only) ----------
+    for element in original.element.body:
+        final_doc.element.body.append(element)
+        if element.tag.endswith('sectPr'):
+            break  # stop after first page
+
+    final_doc.add_page_break()
+
+    # ---------- PAGE 2 (Form details) ----------
+    final_doc.add_heading("Document Details", level=1)
 
     def add(label, value):
-        details.add_paragraph(f"{label}: {value or ''}")
+        final_doc.add_paragraph(f"{label}: {value or ''}")
 
     add("Document Code", document_code)
     add("Client Name", client_name)
@@ -42,20 +49,15 @@ async def download_doc(
     add("Created On", created_on)
     add("Created By", created_by)
 
-    details.add_page_break()
-
-    # -------- FINAL DOCUMENT ----------
-    final_doc = Document()
-
-    # Page 1 → Original document
-    for element in original.element.body:
-        final_doc.element.body.append(element)
-
     final_doc.add_page_break()
 
-    # Page 2 → Form details
-    for element in details.element.body:
-        final_doc.element.body.append(element)
+    # ---------- PAGE 3+ (Remaining original pages) ----------
+    remaining = False
+    for element in original.element.body:
+        if remaining:
+            final_doc.element.body.append(element)
+        if element.tag.endswith('sectPr'):
+            remaining = True
 
     final_path = os.path.join(temp_dir, file.filename)
     final_doc.save(final_path)
@@ -63,5 +65,7 @@ async def download_doc(
     return FileResponse(
         final_path,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename=file.filename   # ✅ ORIGINAL NAME
+        headers={
+            "Content-Disposition": f'attachment; filename="{file.filename}"'
+        }
     )
