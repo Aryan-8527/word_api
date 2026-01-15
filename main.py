@@ -2,7 +2,7 @@ from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from docx import Document
 from pptx import Presentation
-from copy import deepcopy
+from pptx.util import Inches
 import tempfile, os, shutil
 
 app = FastAPI()
@@ -11,45 +11,41 @@ app = FastAPI()
 @app.post("/download-doc")
 async def download_doc(
     file: UploadFile = File(...),
-    document_code: str = Form(None),
-    client_name: str = Form(None),
-    customer: str = Form(None),
-    contractor: str = Form(None),
-    nature: str = Form(None),
-    purpose: str = Form(None),
-    created_on: str = Form(None),
-    created_by: str = Form(None),
+    document_code: str = Form(""),
+    client_name: str = Form(""),
+    customer: str = Form(""),
+    contractor: str = Form(""),
+    nature: str = Form(""),
+    purpose: str = Form(""),
+    created_on: str = Form(""),
+    created_by: str = Form(""),
 ):
     temp_dir = tempfile.mkdtemp()
-    uploaded_path = os.path.join(temp_dir, file.filename)
+    src_path = os.path.join(temp_dir, file.filename)
 
-    with open(uploaded_path, "wb") as f:
+    with open(src_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
     ext = os.path.splitext(file.filename)[1].lower()
-    final_path = os.path.join(temp_dir, file.filename)
+    out_path = os.path.join(temp_dir, file.filename)
 
     # =====================================================
-    # ================= WORD FILE =========================
+    # ================= WORD ==============================
     # =====================================================
     if ext == ".docx":
-        original = Document(uploaded_path)
-        final_doc = Document()
+        src = Document(src_path)
+        out = Document()
 
-        elements = list(original.element.body)
+        # Copy ALL paragraphs first (Word decides pages)
+        for p in src.paragraphs:
+            out.add_paragraph(p.text)
 
-        # PAGE 1 → Original first page
-        for el in elements:
-            final_doc.element.body.append(deepcopy(el))
-            if el.tag.endswith("sectPr"):
-                break
+        # Insert form details AFTER first logical section
+        out.add_page_break()
+        out.add_heading("Document Details", level=1)
 
-        # PAGE 2 → Form details
-        final_doc.add_page_break()
-        final_doc.add_heading("Document Details", level=1)
-
-        def add(label, value):
-            final_doc.add_paragraph(f"{label}: {value or ''}")
+        def add(label, val):
+            out.add_paragraph(f"{label}: {val}")
 
         add("Document Code", document_code)
         add("Client Name", client_name)
@@ -60,45 +56,34 @@ async def download_doc(
         add("Created On", created_on)
         add("Created By", created_by)
 
-        # PAGE 3+ → Remaining original pages
-        final_doc.add_page_break()
-        started = False
-        for el in elements:
-            if started:
-                final_doc.element.body.append(deepcopy(el))
-            if el.tag.endswith("sectPr"):
-                started = True
-
-        final_doc.save(final_path)
+        out.save(out_path)
 
     # =====================================================
-    # ================= PPT FILE ==========================
+    # ================= PPT ===============================
     # =====================================================
     elif ext == ".pptx":
-        original = Presentation(uploaded_path)
-        final_ppt = Presentation()
+        src = Presentation(src_path)
+        out = Presentation()
 
         # Remove default slide
-        while len(final_ppt.slides) > 0:
-            rId = final_ppt.slides._sldIdLst[0].rId
-            final_ppt.part.drop_rel(rId)
-            del final_ppt.slides._sldIdLst[0]
+        while out.slides:
+            out.slides._sldIdLst.remove(out.slides._sldIdLst[0])
 
-        # SLIDE 1 → Original slide 1
-        slide = original.slides[0]
-        layout = final_ppt.slide_layouts[slide.slide_layout.slide_layout_id]
-        new_slide = final_ppt.slides.add_slide(layout)
+        # Slide 1 → Original slide 1
+        slide = src.slides[0]
+        new_slide = out.slides.add_slide(out.slide_layouts[6])
 
         for shape in slide.shapes:
-            new_slide.shapes._spTree.insert_element_before(
-                deepcopy(shape.element), 'p:extLst'
-            )
+            if shape.has_text_frame:
+                textbox = new_slide.shapes.add_textbox(
+                    shape.left, shape.top, shape.width, shape.height
+                )
+                textbox.text_frame.text = shape.text
 
-        # SLIDE 2 → Form details
-        layout = final_ppt.slide_layouts[1]
-        details = final_ppt.slides.add_slide(layout)
-
+        # Slide 2 → Form details
+        details = out.slides.add_slide(out.slide_layouts[1])
         details.shapes.title.text = "Document Details"
+
         tf = details.placeholders[1].text_frame
         tf.text = (
             f"Document Code: {document_code}\n"
@@ -111,24 +96,22 @@ async def download_doc(
             f"Created By: {created_by}"
         )
 
-        # SLIDE 3+ → Remaining slides
-        for slide in original.slides[1:]:
-            layout = final_ppt.slide_layouts[slide.slide_layout.slide_layout_id]
-            new_slide = final_ppt.slides.add_slide(layout)
+        # Remaining slides
+        for slide in src.slides[1:]:
+            new_slide = out.slides.add_slide(out.slide_layouts[6])
             for shape in slide.shapes:
-                new_slide.shapes._spTree.insert_element_before(
-                    deepcopy(shape.element), 'p:extLst'
-                )
+                if shape.has_text_frame:
+                    textbox = new_slide.shapes.add_textbox(
+                        shape.left, shape.top, shape.width, shape.height
+                    )
+                    textbox.text_frame.text = shape.text
 
-        final_ppt.save(final_path)
+        out.save(out_path)
 
     else:
         return {"error": "Unsupported file type"}
 
     return FileResponse(
-        final_path,
-        media_type=file.content_type,
-        headers={
-            "Content-Disposition": f'attachment; filename="{file.filename}"'
-        }
+        out_path,
+        headers={"Content-Disposition": f'attachment; filename="{file.filename}"'}
     )
