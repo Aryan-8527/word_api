@@ -37,9 +37,8 @@ async def download_doc(
     file: UploadFile = File(...),
     document_code: str = Form(""),
     client_name: str = Form(""),
-    customer: str = Form(""),
-    contractor: str = Form(""),
-    nature: str = Form(""),
+    department: str = Form(""),
+    document_type: str = Form(""),
     purpose: str = Form(""),
     created_on: str = Form(""),
     created_by: str = Form("")
@@ -86,9 +85,8 @@ async def download_doc(
 
         add("Document Code", document_code)
         add("Client Name", client_name)
-        add("Customer", customer)
-        add("Contractor", contractor)
-        add("Nature", nature)
+        add("Department", department)
+        add("Document Type", document_type)
         add("Purpose", purpose)
         add("Created On", created_on)
         add("Created By", created_by)
@@ -126,9 +124,8 @@ async def download_doc(
         for text in [
             f"Document Code: {document_code}",
             f"Client Name: {client_name}",
-            f"Customer: {customer}",
-            f"Contractor: {contractor}",
-            f"Nature: {nature}",
+            f"Department: {department}",
+            f"Document Type: {document_type}",
             f"Purpose: {purpose}",
             f"Created On: {created_on}",
             f"Created By: {created_by}",
@@ -155,3 +152,4 @@ async def download_doc(
             "Content-Disposition": f'attachment; filename="{file.filename}"'
         }
     )
+
