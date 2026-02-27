@@ -1,12 +1,10 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
+from docx import Document
 from pptx import Presentation
 import tempfile
-import shutil
 import os
-import subprocess
-from reportlab.pdfgen import canvas
-from PyPDF2 import PdfReader, PdfWriter
+import shutil
 
 app = FastAPI()
 
@@ -32,35 +30,22 @@ async def download_doc(
 
         ext = os.path.splitext(file.filename)[1].lower()
 
-        # =====================================================
-        # ===================== WORD ==========================
-        # =====================================================
+        # ================= DOCX =================
         if ext == ".docx":
 
-            # STEP 1: Convert Word → PDF using LibreOffice
-            subprocess.run([
-                "soffice",
-                "--headless",
-                "--convert-to",
-                "pdf",
-                "--outdir",
-                temp_dir,
-                input_path
-            ], check=True)
+            doc = Document(input_path)
 
-            pdf_name = os.path.splitext(file.filename)[0] + ".pdf"
-            original_pdf_path = os.path.join(temp_dir, pdf_name)
+            # Add new page at end
+            doc.add_page_break()
 
-            # STEP 2: Create Details PDF page
-            details_pdf_path = os.path.join(temp_dir, "details_page.pdf")
-            c = canvas.Canvas(details_pdf_path)
+            # Add heading
+            heading = doc.add_paragraph()
+            run = heading.add_run("Document Details")
+            run.bold = True
 
-            c.setFont("Helvetica-Bold", 16)
-            c.drawString(200, 800, "Document Details")
+            doc.add_paragraph("")
 
-            c.setFont("Helvetica", 12)
-
-            lines = [
+            details = [
                 f"Document Code: {document_code}",
                 f"Client Name: {client_name}",
                 f"Department: {department}",
@@ -70,60 +55,37 @@ async def download_doc(
                 f"Created By: {created_by}",
             ]
 
-            y = 760
-            for line in lines:
-                c.drawString(80, y, line)
-                y -= 25
+            for d in details:
+                doc.add_paragraph(d)
 
-            c.save()
+            output_path = os.path.join(temp_dir, file.filename)
+            doc.save(output_path)
 
-            # STEP 3: Merge PDFs (Insert at page 2)
-            writer = PdfWriter()
-            original_reader = PdfReader(original_pdf_path)
-            details_reader = PdfReader(details_pdf_path)
-
-            # Page 1
-            writer.add_page(original_reader.pages[0])
-
-            # Page 2 (Details)
-            writer.add_page(details_reader.pages[0])
-
-            # Remaining pages
-            for i in range(1, len(original_reader.pages)):
-                writer.add_page(original_reader.pages[i])
-
-            final_pdf_path = os.path.join(temp_dir, "final_output.pdf")
-
-            with open(final_pdf_path, "wb") as f:
-                writer.write(f)
-
-            return FileResponse(
-                final_pdf_path,
-                media_type="application/pdf",
-                headers={
-                    "Content-Disposition": 'attachment; filename="final_output.pdf"'
-                }
-            )
-
-        # =====================================================
-        # ===================== PPT ===========================
-        # =====================================================
+        # ================= PPTX =================
         elif ext == ".pptx":
 
-            # 👇 PPT CODE BILKUL SAME HAI (TOUCH NAHI KIYA)
             prs = Presentation(input_path)
 
-            layout = prs.slide_layouts[1]
-            detail_slide = prs.slides.add_slide(layout)
+            # Use first slide layout
+            first_layout = prs.slides[0].slide_layout
+            detail_slide = prs.slides.add_slide(first_layout)
 
+            # Move slide to 2nd position
             slide_ids = prs.slides._sldIdLst
             slides = list(slide_ids)
             slide_ids.remove(slides[-1])
             slide_ids.insert(1, slides[-1])
 
-            detail_slide.shapes.title.text = "Document Details"
+            if detail_slide.shapes.title:
+                detail_slide.shapes.title.text = "Document Details"
 
-            tf = detail_slide.placeholders[1].text_frame
+            left = prs.slide_width * 0.1
+            top = prs.slide_height * 0.3
+            width = prs.slide_width * 0.8
+            height = prs.slide_height * 0.5
+
+            textbox = detail_slide.shapes.add_textbox(left, top, width, height)
+            tf = textbox.text_frame
             tf.clear()
 
             details = [
@@ -143,16 +105,15 @@ async def download_doc(
             output_path = os.path.join(temp_dir, file.filename)
             prs.save(output_path)
 
-            return FileResponse(
-                output_path,
-                media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                headers={
-                    "Content-Disposition": f'attachment; filename="{file.filename}"'
-                }
-            )
-
         else:
             raise HTTPException(status_code=400, detail="Only DOCX and PPTX supported")
+
+        return FileResponse(
+            output_path,
+            headers={
+                "Content-Disposition": f'attachment; filename="{file.filename}"'
+            }
+        )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
