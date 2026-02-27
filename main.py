@@ -33,36 +33,33 @@ async def download_doc(
         # =====================================================
         # ================= DOCX ===============================
         # =====================================================
-        if ext == ".docx":
+       if ext == ".docx":
 
-            doc = Document(input_path)
+    doc = Document(input_path)
 
-            # Create Document Details content in memory
-            detail_doc = Document()
-            detail_doc.add_heading("Document Details", level=1)
+    # Create page break after first page
+    doc.paragraphs[0].insert_paragraph_after().add_run().add_break()
 
-            details = [
-                f"Document Code: {document_code}",
-                f"Client Name: {client_name}",
-                f"Department: {department}",
-                f"Document Type: {document_type}",
-                f"Purpose: {purpose}",
-                f"Created On: {created_on}",
-                f"Created By: {created_by}",
-            ]
+    # Insert new paragraph for heading
+    heading = doc.paragraphs[1].insert_paragraph_before("Document Details")
+    heading.runs[0].bold = True
 
-            for d in details:
-                detail_doc.add_paragraph(d)
+    # Insert details
+    details = [
+        f"Document Code: {document_code}",
+        f"Client Name: {client_name}",
+        f"Department: {department}",
+        f"Document Type: {document_type}",
+        f"Purpose: {purpose}",
+        f"Created On: {created_on}",
+        f"Created By: {created_by}",
+    ]
 
-            # Insert page break after first page
-            doc.paragraphs[0].insert_paragraph_after().add_run().add_break()
+    for text in reversed(details):
+        doc.paragraphs[1].insert_paragraph_before(text)
 
-            # Insert detail page elements after first paragraph
-            for element in detail_doc.element.body:
-                doc.element.body.insert(1, element)
-
-            output_path = os.path.join(temp_dir, file.filename)
-            doc.save(output_path)
+    output_path = os.path.join(temp_dir, file.filename)
+    doc.save(output_path)
 
         # =====================================================
         # ================= PPTX ===============================
@@ -115,3 +112,4 @@ async def download_doc(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
