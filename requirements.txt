@@ -3,4 +3,4 @@ uvicorn
 python-docx
 python-multipart
 python-pptx
-
+docxcompose
