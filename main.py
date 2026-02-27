@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from docx import Document
+from docx.enum.text import WD_BREAK
 from pptx import Presentation
 import tempfile
 import os
@@ -37,17 +38,16 @@ async def download_doc(
 
             doc = Document(input_path)
 
-            # Find first page break
-            insert_index = None
-            for i, para in enumerate(doc.paragraphs):
-                if "w:br" in para._p.xml:
-                    insert_index = i + 1
-                    break
+            # Insert real page break after first paragraph
+            if len(doc.paragraphs) > 0:
+                first_para = doc.paragraphs[0]
+                page_break_para = first_para.insert_paragraph_after()
+                page_break_para.add_run().add_break(WD_BREAK.PAGE)
+                insert_index = 1
+            else:
+                insert_index = 0
 
-            if insert_index is None:
-                insert_index = 1  # fallback
-
-            # Create details paragraphs
+            # Create Document Details content
             new_paragraphs = []
 
             title_para = doc.add_paragraph()
@@ -68,11 +68,11 @@ async def download_doc(
             for d in details:
                 new_paragraphs.append(doc.add_paragraph(d))
 
-            # Move paragraphs to correct position
+            # Move paragraphs to Page 2 position
             body = doc._body._element
             for para in reversed(new_paragraphs):
                 body.remove(para._p)
-                body.insert(insert_index, para._p)
+                body.insert(insert_index + 1, para._p)
 
             output_path = os.path.join(temp_dir, file.filename)
             doc.save(output_path)
@@ -88,15 +88,17 @@ async def download_doc(
             first_layout = prs.slides[0].slide_layout
             detail_slide = prs.slides.add_slide(first_layout)
 
-            # Move slide to 2nd position
+            # Move new slide to 2nd position
             slide_ids = prs.slides._sldIdLst
             slides = list(slide_ids)
             slide_ids.remove(slides[-1])
             slide_ids.insert(1, slides[-1])
 
+            # Set title
             if detail_slide.shapes.title:
                 detail_slide.shapes.title.text = "Document Details"
 
+            # Add content box
             left = prs.slide_width * 0.1
             top = prs.slide_height * 0.3
             width = prs.slide_width * 0.8
@@ -128,6 +130,7 @@ async def download_doc(
 
         return FileResponse(
             output_path,
+            media_type="application/octet-stream",
             headers={
                 "Content-Disposition": f'attachment; filename="{file.filename}"'
             }
