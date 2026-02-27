@@ -2,8 +2,9 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from docx import Document
 from pptx import Presentation
-from pptx.enum.shapes import MSO_SHAPE_TYPE
-import tempfile, os, shutil
+import tempfile
+import os
+import shutil
 
 app = FastAPI()
 
@@ -23,81 +24,87 @@ async def download_doc(
         temp_dir = tempfile.mkdtemp()
         input_path = os.path.join(temp_dir, file.filename)
 
+        # Save uploaded file
         with open(input_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
 
         ext = os.path.splitext(file.filename)[1].lower()
 
         # =====================================================
-        # ================= WORD (.DOCX) ======================
+        # ================= DOCX ===============================
         # =====================================================
         if ext == ".docx":
 
-            # 🔥 OPEN ORIGINAL DOCUMENT (keeps images)
             doc = Document(input_path)
 
-            # Add page break at end of first page
-            doc.add_page_break()
+            # Create Document Details content in memory
+            detail_doc = Document()
+            detail_doc.add_heading("Document Details", level=1)
 
-            # Add Document Details Page
-            doc.add_heading("Document Details", level=1)
+            details = [
+                f"Document Code: {document_code}",
+                f"Client Name: {client_name}",
+                f"Department: {department}",
+                f"Document Type: {document_type}",
+                f"Purpose: {purpose}",
+                f"Created On: {created_on}",
+                f"Created By: {created_by}",
+            ]
 
-            def add(label, val):
-                doc.add_paragraph(f"{label}: {val}")
+            for d in details:
+                detail_doc.add_paragraph(d)
 
-            add("Document Code", document_code)
-            add("Client Name", client_name)
-            add("Department", department)
-            add("Document Type", document_type)
-            add("Purpose", purpose)
-            add("Created On", created_on)
-            add("Created By", created_by)
+            # Insert page break after first page
+            doc.paragraphs[0].insert_paragraph_after().add_run().add_break()
+
+            # Insert detail page elements after first paragraph
+            for element in detail_doc.element.body:
+                doc.element.body.insert(1, element)
 
             output_path = os.path.join(temp_dir, file.filename)
             doc.save(output_path)
 
         # =====================================================
-        # ================= PPT (.PPTX) =======================
+        # ================= PPTX ===============================
         # =====================================================
         elif ext == ".pptx":
 
-    prs = Presentation(input_path)
+            prs = Presentation(input_path)
 
-    # Create Document Details slide
-    layout = prs.slide_layouts[1]  # Title + Content layout
-    detail_slide = prs.slides.add_slide(layout)
+            # Add new slide using existing layout
+            layout = prs.slide_layouts[1]
+            detail_slide = prs.slides.add_slide(layout)
 
-    # Move slide to position 2 (index 1)
-    xml_slides = prs.slides._sldIdLst
-    slides = list(xml_slides)
-    xml_slides.remove(slides[-1])
-    xml_slides.insert(1, slides[-1])
+            # Move slide to second position
+            slide_ids = prs.slides._sldIdLst
+            slides = list(slide_ids)
+            slide_ids.remove(slides[-1])
+            slide_ids.insert(1, slides[-1])
 
-    # Add content
-    detail_slide.shapes.title.text = "Document Details"
+            detail_slide.shapes.title.text = "Document Details"
 
-    tf = detail_slide.placeholders[1].text_frame
-    tf.clear()
+            tf = detail_slide.placeholders[1].text_frame
+            tf.clear()
 
-    details = [
-        f"Document Code: {document_code}",
-        f"Client Name: {client_name}",
-        f"Department: {department}",
-        f"Document Type: {document_type}",
-        f"Purpose: {purpose}",
-        f"Created On: {created_on}",
-        f"Created By: {created_by}",
-    ]
+            details = [
+                f"Document Code: {document_code}",
+                f"Client Name: {client_name}",
+                f"Department: {department}",
+                f"Document Type: {document_type}",
+                f"Purpose: {purpose}",
+                f"Created On: {created_on}",
+                f"Created By: {created_by}",
+            ]
 
-    for d in details:
-        p = tf.add_paragraph()
-        p.text = d
+            for d in details:
+                p = tf.add_paragraph()
+                p.text = d
 
-    output_path = os.path.join(temp_dir, file.filename)
-    prs.save(output_path)
+            output_path = os.path.join(temp_dir, file.filename)
+            prs.save(output_path)
 
         else:
-            raise HTTPException(status_code=400, detail="Unsupported file type")
+            raise HTTPException(status_code=400, detail="Only DOCX and PPTX supported")
 
         return FileResponse(
             output_path,
@@ -108,4 +115,3 @@ async def download_doc(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
