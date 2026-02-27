@@ -25,7 +25,7 @@ async def download_doc(
         temp_dir = tempfile.mkdtemp()
         input_path = os.path.join(temp_dir, file.filename)
 
-        # Save file
+        # Save uploaded file
         with open(input_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
 
@@ -38,22 +38,44 @@ async def download_doc(
 
             doc = Document(input_path)
 
-            # STEP 1 → Create page break paragraph
+            if len(doc.paragraphs) == 0:
+                raise HTTPException(status_code=400, detail="Empty document")
+
+            body = doc._body._element
+
+            # ---- Step 1: Create page break ----
             page_break_para = doc.add_paragraph()
             page_break_para.add_run().add_break(WD_BREAK.PAGE)
 
-            # STEP 2 → Create details content
-            title_para = doc.add_paragraph()
-            run = title_para.add_run("Document Details")
-            run.bold = True
+            # ---- Step 2: Create Document Details content ----
+            new_paragraphs = []
 
-            doc.add_paragraph(f"Document Code: {document_code}")
-            doc.add_paragraph(f"Client Name: {client_name}")
-            doc.add_paragraph(f"Department: {department}")
-            doc.add_paragraph(f"Document Type: {document_type}")
-            doc.add_paragraph(f"Purpose: {purpose}")
-            doc.add_paragraph(f"Created On: {created_on}")
-            doc.add_paragraph(f"Created By: {created_by}")
+            title_para = doc.add_paragraph()
+            title_run = title_para.add_run("Document Details")
+            title_run.bold = True
+            new_paragraphs.append(title_para)
+
+            details = [
+                f"Document Code: {document_code}",
+                f"Client Name: {client_name}",
+                f"Department: {department}",
+                f"Document Type: {document_type}",
+                f"Purpose: {purpose}",
+                f"Created On: {created_on}",
+                f"Created By: {created_by}",
+            ]
+
+            for d in details:
+                new_paragraphs.append(doc.add_paragraph(d))
+
+            # ---- Step 3: Move new content after first paragraph ----
+            insert_position = 1  # After first paragraph
+
+            all_new_content = [page_break_para] + new_paragraphs
+
+            for para in reversed(all_new_content):
+                body.remove(para._p)
+                body.insert(insert_position, para._p)
 
             output_path = os.path.join(temp_dir, file.filename)
             doc.save(output_path)
@@ -65,18 +87,21 @@ async def download_doc(
 
             prs = Presentation(input_path)
 
-            layout = prs.slides[0].slide_layout
-            detail_slide = prs.slides.add_slide(layout)
+            # Use same layout as first slide
+            first_layout = prs.slides[0].slide_layout
+            detail_slide = prs.slides.add_slide(first_layout)
 
-            # Move to 2nd position
+            # Move slide to 2nd position
             slide_ids = prs.slides._sldIdLst
             slides = list(slide_ids)
             slide_ids.remove(slides[-1])
             slide_ids.insert(1, slides[-1])
 
+            # Set title
             if detail_slide.shapes.title:
                 detail_slide.shapes.title.text = "Document Details"
 
+            # Add content textbox
             left = prs.slide_width * 0.1
             top = prs.slide_height * 0.3
             width = prs.slide_width * 0.8
