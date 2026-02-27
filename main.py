@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from docx import Document
-from docx.enum.text import WD_BREAK
+from docx.enum.section import WD_SECTION
 from pptx import Presentation
 import tempfile
 import os
@@ -35,35 +35,28 @@ async def download_doc(
 
             doc = Document(input_path)
 
-            if len(doc.paragraphs) == 0:
-                raise HTTPException(status_code=400, detail="Empty document")
+            # STEP 1: Create new section (new page)
+            section = doc.add_section(WD_SECTION.NEW_PAGE)
 
-            # ---- STEP 1: Insert page break after first paragraph ----
-            first_para = doc.paragraphs[0]
-            run = first_para.add_run()
-            run.add_break(WD_BREAK.PAGE)
-
-            # ---- STEP 2: Insert Details after page break ----
-            details_lines = [
-                "Document Details",
-                "",
-                f"Document Code: {document_code}",
-                f"Client Name: {client_name}",
-                f"Department: {department}",
-                f"Document Type: {document_type}",
-                f"Purpose: {purpose}",
-                f"Created On: {created_on}",
-                f"Created By: {created_by}",
-            ]
-
-            # Insert right after first paragraph
-            insert_index = 1
+            # STEP 2: Move this section to second position
             body = doc._body._element
+            new_section = body[-1]
+            body.remove(new_section)
+            body.insert(1, new_section)
 
-            for line in reversed(details_lines):
-                para = doc.add_paragraph(line)
-                body.remove(para._p)
-                body.insert(insert_index, para._p)
+            # STEP 3: Add only details in that section
+            p = doc.add_paragraph()
+            p._p.getparent().remove(p._p)
+            body.insert(2, p._p)
+
+            p.add_run("Document Details\n\n").bold = True
+            p.add_run(f"Document Code: {document_code}\n")
+            p.add_run(f"Client Name: {client_name}\n")
+            p.add_run(f"Department: {department}\n")
+            p.add_run(f"Document Type: {document_type}\n")
+            p.add_run(f"Purpose: {purpose}\n")
+            p.add_run(f"Created On: {created_on}\n")
+            p.add_run(f"Created By: {created_by}\n")
 
             output_path = os.path.join(temp_dir, file.filename)
             doc.save(output_path)
@@ -72,11 +65,9 @@ async def download_doc(
         elif ext == ".pptx":
 
             prs = Presentation(input_path)
-
             layout = prs.slides[0].slide_layout
             detail_slide = prs.slides.add_slide(layout)
 
-            # Move slide to 2nd position
             slide_ids = prs.slides._sldIdLst
             slides = list(slide_ids)
             slide_ids.remove(slides[-1])
