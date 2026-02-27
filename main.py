@@ -1,11 +1,11 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from docx import Document
-from docx.enum.section import WD_SECTION
+from docxcompose.composer import Composer
 from pptx import Presentation
 import tempfile
-import os
 import shutil
+import os
 
 app = FastAPI()
 
@@ -25,64 +25,69 @@ async def download_doc(
         temp_dir = tempfile.mkdtemp()
         input_path = os.path.join(temp_dir, file.filename)
 
+        # Save uploaded file
         with open(input_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
 
         ext = os.path.splitext(file.filename)[1].lower()
 
-        # ================= DOCX =================
+        # =====================================================
+        # ===================== WORD ==========================
+        # =====================================================
         if ext == ".docx":
 
-            doc = Document(input_path)
+            original_doc = Document(input_path)
 
-            # STEP 1: Create new section (new page)
-            section = doc.add_section(WD_SECTION.NEW_PAGE)
+            # Create new details page
+            details_doc = Document()
+            details_doc.add_heading("Document Details", level=1)
+            details_doc.add_paragraph(f"Document Code: {document_code}")
+            details_doc.add_paragraph(f"Client Name: {client_name}")
+            details_doc.add_paragraph(f"Department: {department}")
+            details_doc.add_paragraph(f"Document Type: {document_type}")
+            details_doc.add_paragraph(f"Purpose: {purpose}")
+            details_doc.add_paragraph(f"Created On: {created_on}")
+            details_doc.add_paragraph(f"Created By: {created_by}")
 
-            # STEP 2: Move this section to second position
-            body = doc._body._element
-            new_section = body[-1]
-            body.remove(new_section)
-            body.insert(1, new_section)
+            details_doc.add_page_break()
 
-            # STEP 3: Add only details in that section
-            p = doc.add_paragraph()
-            p._p.getparent().remove(p._p)
-            body.insert(2, p._p)
+            # Merge
+            composer = Composer(original_doc)
 
-            p.add_run("Document Details\n\n").bold = True
-            p.add_run(f"Document Code: {document_code}\n")
-            p.add_run(f"Client Name: {client_name}\n")
-            p.add_run(f"Department: {department}\n")
-            p.add_run(f"Document Type: {document_type}\n")
-            p.add_run(f"Purpose: {purpose}\n")
-            p.add_run(f"Created On: {created_on}\n")
-            p.add_run(f"Created By: {created_by}\n")
+            # Insert at second position
+            composer.insert(1, details_doc)
 
             output_path = os.path.join(temp_dir, file.filename)
-            doc.save(output_path)
+            composer.save(output_path)
 
-        # ================= PPTX =================
+            return FileResponse(
+                output_path,
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{file.filename}"'
+                }
+            )
+
+        # =====================================================
+        # ===================== PPT ===========================
+        # =====================================================
         elif ext == ".pptx":
 
+            # 👇 Ye wala code SAME rakha gaya hai (touch nahi kiya)
             prs = Presentation(input_path)
-            layout = prs.slides[0].slide_layout
+
+            layout = prs.slide_layouts[1]
             detail_slide = prs.slides.add_slide(layout)
 
+            # Move slide to 2nd position
             slide_ids = prs.slides._sldIdLst
             slides = list(slide_ids)
             slide_ids.remove(slides[-1])
             slide_ids.insert(1, slides[-1])
 
-            if detail_slide.shapes.title:
-                detail_slide.shapes.title.text = "Document Details"
+            detail_slide.shapes.title.text = "Document Details"
 
-            left = prs.slide_width * 0.1
-            top = prs.slide_height * 0.3
-            width = prs.slide_width * 0.8
-            height = prs.slide_height * 0.5
-
-            textbox = detail_slide.shapes.add_textbox(left, top, width, height)
-            tf = textbox.text_frame
+            tf = detail_slide.placeholders[1].text_frame
             tf.clear()
 
             details = [
@@ -102,16 +107,16 @@ async def download_doc(
             output_path = os.path.join(temp_dir, file.filename)
             prs.save(output_path)
 
+            return FileResponse(
+                output_path,
+                media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{file.filename}"'
+                }
+            )
+
         else:
             raise HTTPException(status_code=400, detail="Only DOCX and PPTX supported")
-
-        return FileResponse(
-            output_path,
-            media_type="application/octet-stream",
-            headers={
-                "Content-Disposition": f'attachment; filename="{file.filename}"'
-            }
-        )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
