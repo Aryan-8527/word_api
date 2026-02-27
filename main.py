@@ -3,8 +3,6 @@ from fastapi.responses import FileResponse
 from docx import Document
 from docx.enum.text import WD_BREAK
 from pptx import Presentation
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
 import tempfile
 import os
 import shutil
@@ -27,49 +25,28 @@ async def download_doc(
         temp_dir = tempfile.mkdtemp()
         input_path = os.path.join(temp_dir, file.filename)
 
-        # Save uploaded file
         with open(input_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
 
         ext = os.path.splitext(file.filename)[1].lower()
 
-        # =====================================================
-        # ================= DOCX ===============================
-        # =====================================================
+        # ================= DOCX =================
         if ext == ".docx":
 
-            original_doc = Document(input_path)
-            new_doc = Document()
+            doc = Document(input_path)
 
-            # ---- Copy entire original document ----
-            for element in original_doc.element.body:
-                new_doc.element.body.append(element)
+            if len(doc.paragraphs) == 0:
+                raise HTTPException(status_code=400, detail="Empty document")
 
-            body = new_doc._body._element
+            # ---- STEP 1: Insert page break after first paragraph ----
+            first_para = doc.paragraphs[0]
+            run = first_para.add_run()
+            run.add_break(WD_BREAK.PAGE)
 
-            # ---- Create page break XML ----
-            p = OxmlElement("w:p")
-            r = OxmlElement("w:r")
-            br = OxmlElement("w:br")
-            br.set(qn("w:type"), "page")
-            r.append(br)
-            p.append(r)
-
-            # ---- Insert page break after first element ----
-            body.insert(1, p)
-
-            # ---- Insert Document Details page ----
-            insert_position = 2
-
-            title_para = new_doc.add_paragraph()
-            title_run = title_para.add_run("Document Details")
-            title_run.bold = True
-
-            body.remove(title_para._p)
-            body.insert(insert_position, title_para._p)
-            insert_position += 1
-
-            detail_lines = [
+            # ---- STEP 2: Insert Details after page break ----
+            details_lines = [
+                "Document Details",
+                "",
                 f"Document Code: {document_code}",
                 f"Client Name: {client_name}",
                 f"Department: {department}",
@@ -79,18 +56,19 @@ async def download_doc(
                 f"Created By: {created_by}",
             ]
 
-            for line in detail_lines:
-                para = new_doc.add_paragraph(line)
+            # Insert right after first paragraph
+            insert_index = 1
+            body = doc._body._element
+
+            for line in reversed(details_lines):
+                para = doc.add_paragraph(line)
                 body.remove(para._p)
-                body.insert(insert_position, para._p)
-                insert_position += 1
+                body.insert(insert_index, para._p)
 
             output_path = os.path.join(temp_dir, file.filename)
-            new_doc.save(output_path)
+            doc.save(output_path)
 
-        # =====================================================
-        # ================= PPTX ===============================
-        # =====================================================
+        # ================= PPTX =================
         elif ext == ".pptx":
 
             prs = Presentation(input_path)
