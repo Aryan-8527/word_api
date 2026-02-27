@@ -33,65 +33,80 @@ async def download_doc(
         # ================= DOCX =================
         if ext == ".docx":
 
-            doc = Document(input_path)
+    doc = Document(input_path)
 
-            # Insert page break after first paragraph
-            if len(doc.paragraphs) > 0:
-                doc.paragraphs[0].insert_paragraph_after().add_run().add_break()
+    # Add page break at end of first page safely
+    doc.add_page_break()
 
-            # Insert Document Details content
-            details = [
-                "Document Details",
-                f"Document Code: {document_code}",
-                f"Client Name: {client_name}",
-                f"Department: {department}",
-                f"Document Type: {document_type}",
-                f"Purpose: {purpose}",
-                f"Created On: {created_on}",
-                f"Created By: {created_by}",
-            ]
+    # Add Document Details normally (safe way)
+    heading = doc.add_heading("Document Details", level=1)
 
-            for text in reversed(details):
-                doc.paragraphs[1].insert_paragraph_before(text)
+    details = [
+        f"Document Code: {document_code}",
+        f"Client Name: {client_name}",
+        f"Department: {department}",
+        f"Document Type: {document_type}",
+        f"Purpose: {purpose}",
+        f"Created On: {created_on}",
+        f"Created By: {created_by}",
+    ]
 
-            output_path = os.path.join(temp_dir, file.filename)
-            doc.save(output_path)
+    for d in details:
+        doc.add_paragraph(d)
+
+    output_path = os.path.join(temp_dir, file.filename)
+    doc.save(output_path)
 
         # ================= PPTX =================
         elif ext == ".pptx":
 
-            prs = Presentation(input_path)
+    prs = Presentation(input_path)
 
-            layout = prs.slide_layouts[1]
-            detail_slide = prs.slides.add_slide(layout)
+    # Use same layout as first slide
+    first_slide_layout = prs.slides[0].slide_layout
+    detail_slide = prs.slides.add_slide(first_slide_layout)
 
-            # Move new slide to 2nd position
-            slide_ids = prs.slides._sldIdLst
-            slides = list(slide_ids)
-            slide_ids.remove(slides[-1])
-            slide_ids.insert(1, slides[-1])
+    # Move to 2nd position
+    slide_ids = prs.slides._sldIdLst
+    slides = list(slide_ids)
+    slide_ids.remove(slides[-1])
+    slide_ids.insert(1, slides[-1])
 
-            detail_slide.shapes.title.text = "Document Details"
+    # Clear all existing shapes except background
+    for shape in list(detail_slide.shapes):
+        if not shape.is_placeholder:
+            detail_slide.shapes._spTree.remove(shape._element)
 
-            tf = detail_slide.placeholders[1].text_frame
-            tf.clear()
+    # Add title
+    if detail_slide.shapes.title:
+        detail_slide.shapes.title.text = "Document Details"
 
-            details = [
-                f"Document Code: {document_code}",
-                f"Client Name: {client_name}",
-                f"Department: {department}",
-                f"Document Type: {document_type}",
-                f"Purpose: {purpose}",
-                f"Created On: {created_on}",
-                f"Created By: {created_by}",
-            ]
+    # Add content textbox manually inside slide
+    left = prs.slide_width * 0.1
+    top = prs.slide_height * 0.3
+    width = prs.slide_width * 0.8
+    height = prs.slide_height * 0.5
 
-            for d in details:
-                p = tf.add_paragraph()
-                p.text = d
+    textbox = detail_slide.shapes.add_textbox(left, top, width, height)
+    tf = textbox.text_frame
+    tf.clear()
 
-            output_path = os.path.join(temp_dir, file.filename)
-            prs.save(output_path)
+    details = [
+        f"Document Code: {document_code}",
+        f"Client Name: {client_name}",
+        f"Department: {department}",
+        f"Document Type: {document_type}",
+        f"Purpose: {purpose}",
+        f"Created On: {created_on}",
+        f"Created By: {created_by}",
+    ]
+
+    for d in details:
+        p = tf.add_paragraph()
+        p.text = d
+
+    output_path = os.path.join(temp_dir, file.filename)
+    prs.save(output_path)
 
         else:
             raise HTTPException(status_code=400, detail="Only DOCX and PPTX supported")
@@ -105,3 +120,4 @@ async def download_doc(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
