@@ -1,3 +1,4 @@
+
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from docx import Document
@@ -33,28 +34,34 @@ async def download_doc(
         # ================= DOCX =================
         if ext == ".docx":
 
-            doc = Document(input_path)
+    doc = Document(input_path)
 
-            # Add page break
-            doc.add_page_break()
+    # Add page break safely
+    doc.add_page_break()
 
-            doc.add_heading("Document Details", level=1)
+    # Add title without using Heading style
+    title_para = doc.add_paragraph()
+    run = title_para.add_run("Document Details")
+    run.bold = True
+    run.font.size = None  # keep default document size
 
-            details = [
-                f"Document Code: {document_code}",
-                f"Client Name: {client_name}",
-                f"Department: {department}",
-                f"Document Type: {document_type}",
-                f"Purpose: {purpose}",
-                f"Created On: {created_on}",
-                f"Created By: {created_by}",
-            ]
+    doc.add_paragraph("")  # empty line
 
-            for d in details:
-                doc.add_paragraph(d)
+    details = [
+        f"Document Code: {document_code}",
+        f"Client Name: {client_name}",
+        f"Department: {department}",
+        f"Document Type: {document_type}",
+        f"Purpose: {purpose}",
+        f"Created On: {created_on}",
+        f"Created By: {created_by}",
+    ]
 
-            output_path = os.path.join(temp_dir, file.filename)
-            doc.save(output_path)
+    for d in details:
+        doc.add_paragraph(d)
+
+    output_path = os.path.join(temp_dir, file.filename)
+    doc.save(output_path)
 
         # ================= PPTX =================
         elif ext == ".pptx":
