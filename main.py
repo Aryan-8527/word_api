@@ -1,11 +1,10 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from docx import Document
-from docxcompose.composer import Composer
 from pptx import Presentation
 import tempfile
-import shutil
 import os
+import shutil
 
 app = FastAPI()
 
@@ -32,33 +31,49 @@ async def download_doc(
         ext = os.path.splitext(file.filename)[1].lower()
 
         # =====================================================
-        # ===================== WORD ==========================
+        # ================= DOCX ===============================
         # =====================================================
         if ext == ".docx":
 
-            original_doc = Document(input_path)
+            doc = Document(input_path)
 
-            # Create new details page
-            details_doc = Document()
-            details_doc.add_heading("Document Details", level=1)
-            details_doc.add_paragraph(f"Document Code: {document_code}")
-            details_doc.add_paragraph(f"Client Name: {client_name}")
-            details_doc.add_paragraph(f"Department: {department}")
-            details_doc.add_paragraph(f"Document Type: {document_type}")
-            details_doc.add_paragraph(f"Purpose: {purpose}")
-            details_doc.add_paragraph(f"Created On: {created_on}")
-            details_doc.add_paragraph(f"Created By: {created_by}")
+            if len(doc.paragraphs) == 0:
+                raise HTTPException(status_code=400, detail="Empty document")
 
-            details_doc.add_page_break()
+            body = doc._body._element
 
-            # Merge
-            composer = Composer(original_doc)
+            # STEP 1: First paragraph ke baad blank lines force karo
+            first_para = doc.paragraphs[0]
+            for _ in range(40):   # adjust if needed
+                first_para.add_run("\n")
 
-            # Insert at second position
-            composer.insert(1, details_doc)
+            # STEP 2: Details insert karo second position par
+            insert_position = 1
+
+            details_lines = [
+                "Document Details",
+                "",
+                f"Document Code: {document_code}",
+                f"Client Name: {client_name}",
+                f"Department: {department}",
+                f"Document Type: {document_type}",
+                f"Purpose: {purpose}",
+                f"Created On: {created_on}",
+                f"Created By: {created_by}",
+            ]
+
+            for line in reversed(details_lines):
+                para = doc.add_paragraph(line)
+                body.remove(para._p)
+                body.insert(insert_position, para._p)
+
+            # STEP 3: Details ke baad bhi blank lines push karo
+            details_para = doc.paragraphs[insert_position]
+            for _ in range(35):  # adjust if needed
+                details_para.add_run("\n")
 
             output_path = os.path.join(temp_dir, file.filename)
-            composer.save(output_path)
+            doc.save(output_path)
 
             return FileResponse(
                 output_path,
@@ -69,11 +84,11 @@ async def download_doc(
             )
 
         # =====================================================
-        # ===================== PPT ===========================
+        # ================= PPTX ===============================
         # =====================================================
         elif ext == ".pptx":
 
-            # 👇 Ye wala code SAME rakha gaya hai (touch nahi kiya)
+            # ⚠ PPT CODE BILKUL SAME RAKHA HAI
             prs = Presentation(input_path)
 
             layout = prs.slide_layouts[1]
