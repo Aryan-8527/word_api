@@ -1,10 +1,12 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
-from docx import Document
 from pptx import Presentation
 import tempfile
-import os
 import shutil
+import os
+import subprocess
+from reportlab.pdfgen import canvas
+from PyPDF2 import PdfReader, PdfWriter
 
 app = FastAPI()
 
@@ -31,28 +33,34 @@ async def download_doc(
         ext = os.path.splitext(file.filename)[1].lower()
 
         # =====================================================
-        # ================= DOCX ===============================
+        # ===================== WORD ==========================
         # =====================================================
         if ext == ".docx":
 
-            doc = Document(input_path)
+            # STEP 1: Convert Word → PDF using LibreOffice
+            subprocess.run([
+                "soffice",
+                "--headless",
+                "--convert-to",
+                "pdf",
+                "--outdir",
+                temp_dir,
+                input_path
+            ], check=True)
 
-            if len(doc.paragraphs) == 0:
-                raise HTTPException(status_code=400, detail="Empty document")
+            pdf_name = os.path.splitext(file.filename)[0] + ".pdf"
+            original_pdf_path = os.path.join(temp_dir, pdf_name)
 
-            body = doc._body._element
+            # STEP 2: Create Details PDF page
+            details_pdf_path = os.path.join(temp_dir, "details_page.pdf")
+            c = canvas.Canvas(details_pdf_path)
 
-            # STEP 1: First paragraph ke baad blank lines force karo
-            first_para = doc.paragraphs[0]
-            for _ in range(40):   # adjust if needed
-                first_para.add_run("\n")
+            c.setFont("Helvetica-Bold", 16)
+            c.drawString(200, 800, "Document Details")
 
-            # STEP 2: Details insert karo second position par
-            insert_position = 1
+            c.setFont("Helvetica", 12)
 
-            details_lines = [
-                "Document Details",
-                "",
+            lines = [
                 f"Document Code: {document_code}",
                 f"Client Name: {client_name}",
                 f"Department: {department}",
@@ -62,39 +70,52 @@ async def download_doc(
                 f"Created By: {created_by}",
             ]
 
-            for line in reversed(details_lines):
-                para = doc.add_paragraph(line)
-                body.remove(para._p)
-                body.insert(insert_position, para._p)
+            y = 760
+            for line in lines:
+                c.drawString(80, y, line)
+                y -= 25
 
-            # STEP 3: Details ke baad bhi blank lines push karo
-            details_para = doc.paragraphs[insert_position]
-            for _ in range(35):  # adjust if needed
-                details_para.add_run("\n")
+            c.save()
 
-            output_path = os.path.join(temp_dir, file.filename)
-            doc.save(output_path)
+            # STEP 3: Merge PDFs (Insert at page 2)
+            writer = PdfWriter()
+            original_reader = PdfReader(original_pdf_path)
+            details_reader = PdfReader(details_pdf_path)
+
+            # Page 1
+            writer.add_page(original_reader.pages[0])
+
+            # Page 2 (Details)
+            writer.add_page(details_reader.pages[0])
+
+            # Remaining pages
+            for i in range(1, len(original_reader.pages)):
+                writer.add_page(original_reader.pages[i])
+
+            final_pdf_path = os.path.join(temp_dir, "final_output.pdf")
+
+            with open(final_pdf_path, "wb") as f:
+                writer.write(f)
 
             return FileResponse(
-                output_path,
-                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                final_pdf_path,
+                media_type="application/pdf",
                 headers={
-                    "Content-Disposition": f'attachment; filename="{file.filename}"'
+                    "Content-Disposition": 'attachment; filename="final_output.pdf"'
                 }
             )
 
         # =====================================================
-        # ================= PPTX ===============================
+        # ===================== PPT ===========================
         # =====================================================
         elif ext == ".pptx":
 
-            # ⚠ PPT CODE BILKUL SAME RAKHA HAI
+            # 👇 PPT CODE BILKUL SAME HAI (TOUCH NAHI KIYA)
             prs = Presentation(input_path)
 
             layout = prs.slide_layouts[1]
             detail_slide = prs.slides.add_slide(layout)
 
-            # Move slide to 2nd position
             slide_ids = prs.slides._sldIdLst
             slides = list(slide_ids)
             slide_ids.remove(slides[-1])
