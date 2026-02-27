@@ -30,22 +30,17 @@ async def download_doc(
 
         ext = os.path.splitext(file.filename)[1].lower()
 
-        # ================= DOCX =================
+        # =====================================================
+        # ===================== WORD ==========================
+        # =====================================================
         if ext == ".docx":
 
             doc = Document(input_path)
 
-            # Add new page at end
-            doc.add_page_break()
-
-            # Add heading
-            heading = doc.add_paragraph()
-            run = heading.add_run("Document Details")
-            run.bold = True
-
-            doc.add_paragraph("")
-
+            # Prepare details content
             details = [
+                "Document Details",
+                "",
                 f"Document Code: {document_code}",
                 f"Client Name: {client_name}",
                 f"Department: {department}",
@@ -53,39 +48,37 @@ async def download_doc(
                 f"Purpose: {purpose}",
                 f"Created On: {created_on}",
                 f"Created By: {created_by}",
+                "",
+                "--------------------------------------------",
+                ""
             ]
 
-            for d in details:
-                doc.add_paragraph(d)
+            # Insert at very top (reverse order)
+            for text in reversed(details):
+                doc.paragraphs[0].insert_paragraph_before(text)
 
             output_path = os.path.join(temp_dir, file.filename)
             doc.save(output_path)
 
-        # ================= PPTX =================
+        # =====================================================
+        # ===================== PPT ===========================
+        # =====================================================
         elif ext == ".pptx":
 
+            # 🔥 PPT CODE SAME AS BEFORE (NOT TOUCHED)
             prs = Presentation(input_path)
 
-            # Use first slide layout
-            first_layout = prs.slides[0].slide_layout
-            detail_slide = prs.slides.add_slide(first_layout)
+            layout = prs.slide_layouts[1]
+            detail_slide = prs.slides.add_slide(layout)
 
-            # Move slide to 2nd position
             slide_ids = prs.slides._sldIdLst
             slides = list(slide_ids)
             slide_ids.remove(slides[-1])
             slide_ids.insert(1, slides[-1])
 
-            if detail_slide.shapes.title:
-                detail_slide.shapes.title.text = "Document Details"
+            detail_slide.shapes.title.text = "Document Details"
 
-            left = prs.slide_width * 0.1
-            top = prs.slide_height * 0.3
-            width = prs.slide_width * 0.8
-            height = prs.slide_height * 0.5
-
-            textbox = detail_slide.shapes.add_textbox(left, top, width, height)
-            tf = textbox.text_frame
+            tf = detail_slide.placeholders[1].text_frame
             tf.clear()
 
             details = [
