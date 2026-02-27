@@ -1,4 +1,3 @@
-
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from docx import Document
@@ -25,7 +24,6 @@ async def download_doc(
         temp_dir = tempfile.mkdtemp()
         input_path = os.path.join(temp_dir, file.filename)
 
-        # Save uploaded file
         with open(input_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
 
@@ -34,45 +32,40 @@ async def download_doc(
         # ================= DOCX =================
         if ext == ".docx":
 
-    doc = Document(input_path)
+            doc = Document(input_path)
 
-    # Add page break safely
-    doc.add_page_break()
+            doc.add_page_break()
 
-    # Add title without using Heading style
-    title_para = doc.add_paragraph()
-    run = title_para.add_run("Document Details")
-    run.bold = True
-    run.font.size = None  # keep default document size
+            title_para = doc.add_paragraph()
+            run = title_para.add_run("Document Details")
+            run.bold = True
 
-    doc.add_paragraph("")  # empty line
+            doc.add_paragraph("")
 
-    details = [
-        f"Document Code: {document_code}",
-        f"Client Name: {client_name}",
-        f"Department: {department}",
-        f"Document Type: {document_type}",
-        f"Purpose: {purpose}",
-        f"Created On: {created_on}",
-        f"Created By: {created_by}",
-    ]
+            details = [
+                f"Document Code: {document_code}",
+                f"Client Name: {client_name}",
+                f"Department: {department}",
+                f"Document Type: {document_type}",
+                f"Purpose: {purpose}",
+                f"Created On: {created_on}",
+                f"Created By: {created_by}",
+            ]
 
-    for d in details:
-        doc.add_paragraph(d)
+            for d in details:
+                doc.add_paragraph(d)
 
-    output_path = os.path.join(temp_dir, file.filename)
-    doc.save(output_path)
+            output_path = os.path.join(temp_dir, file.filename)
+            doc.save(output_path)
 
         # ================= PPTX =================
         elif ext == ".pptx":
 
             prs = Presentation(input_path)
 
-            # Use same layout as first slide
             first_layout = prs.slides[0].slide_layout
             detail_slide = prs.slides.add_slide(first_layout)
 
-            # Move new slide to 2nd position
             slide_ids = prs.slides._sldIdLst
             slides = list(slide_ids)
             slide_ids.remove(slides[-1])
