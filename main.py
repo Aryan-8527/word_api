@@ -33,27 +33,33 @@ async def download_doc(
         # =====================================================
         # ================= DOCX ===============================
         # =====================================================
-          if ext == ".docx":
+        if ext == ".docx":
 
-            # 🔥 OPEN ORIGINAL DOCUMENT (keeps images)
             doc = Document(input_path)
 
-            # Add page break at end of first page
-            doc.add_page_break()
+            # Create Document Details content in memory
+            detail_doc = Document()
+            detail_doc.add_heading("Document Details", level=1)
 
-            # Add Document Details Page
-            doc.add_heading("Document Details", level=1)
+            details = [
+                f"Document Code: {document_code}",
+                f"Client Name: {client_name}",
+                f"Department: {department}",
+                f"Document Type: {document_type}",
+                f"Purpose: {purpose}",
+                f"Created On: {created_on}",
+                f"Created By: {created_by}",
+            ]
 
-            def add(label, val):
-                doc.add_paragraph(f"{label}: {val}")
+            for d in details:
+                detail_doc.add_paragraph(d)
 
-            add("Document Code", document_code)
-            add("Client Name", client_name)
-            add("Department", department)
-            add("Document Type", document_type)
-            add("Purpose", purpose)
-            add("Created On", created_on)
-            add("Created By", created_by)
+            # Insert page break after first page
+            doc.paragraphs[0].insert_paragraph_after().add_run().add_break()
+
+            # Insert detail page elements after first paragraph
+            for element in detail_doc.element.body:
+                doc.element.body.insert(1, element)
 
             output_path = os.path.join(temp_dir, file.filename)
             doc.save(output_path)
@@ -109,4 +115,3 @@ async def download_doc(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
