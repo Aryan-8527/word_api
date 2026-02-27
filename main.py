@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from docx import Document
+from docx.enum.section import WD_SECTION
 from pptx import Presentation
 import tempfile
 import os
@@ -24,51 +25,47 @@ async def download_doc(
         temp_dir = tempfile.mkdtemp()
         input_path = os.path.join(temp_dir, file.filename)
 
-        # Save uploaded file
         with open(input_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
 
         ext = os.path.splitext(file.filename)[1].lower()
 
-        # =====================================================
-        # ===================== WORD ==========================
-        # =====================================================
+        # ================= DOCX =================
         if ext == ".docx":
 
             doc = Document(input_path)
 
-            # Prepare details content
-            details = [
-                "Document Details",
-                "",
-                f"Document Code: {document_code}",
-                f"Client Name: {client_name}",
-                f"Department: {department}",
-                f"Document Type: {document_type}",
-                f"Purpose: {purpose}",
-                f"Created On: {created_on}",
-                f"Created By: {created_by}",
-                "",
-                "--------------------------------------------",
-                ""
-            ]
+            # STEP 1: Create new section (new page)
+            section = doc.add_section(WD_SECTION.NEW_PAGE)
 
-            # Insert at very top (reverse order)
-            for text in reversed(details):
-                doc.paragraphs[0].insert_paragraph_before(text)
+            # STEP 2: Move this section to second position
+            body = doc._body._element
+            new_section = body[-1]
+            body.remove(new_section)
+            body.insert(1, new_section)
+
+            # STEP 3: Add only details in that section
+            p = doc.add_paragraph()
+            p._p.getparent().remove(p._p)
+            body.insert(2, p._p)
+
+            p.add_run("Document Details\n\n").bold = True
+            p.add_run(f"Document Code: {document_code}\n")
+            p.add_run(f"Client Name: {client_name}\n")
+            p.add_run(f"Department: {department}\n")
+            p.add_run(f"Document Type: {document_type}\n")
+            p.add_run(f"Purpose: {purpose}\n")
+            p.add_run(f"Created On: {created_on}\n")
+            p.add_run(f"Created By: {created_by}\n")
 
             output_path = os.path.join(temp_dir, file.filename)
             doc.save(output_path)
 
-        # =====================================================
-        # ===================== PPT ===========================
-        # =====================================================
+        # ================= PPTX =================
         elif ext == ".pptx":
 
-            # 🔥 PPT CODE SAME AS BEFORE (NOT TOUCHED)
             prs = Presentation(input_path)
-
-            layout = prs.slide_layouts[1]
+            layout = prs.slides[0].slide_layout
             detail_slide = prs.slides.add_slide(layout)
 
             slide_ids = prs.slides._sldIdLst
@@ -76,9 +73,16 @@ async def download_doc(
             slide_ids.remove(slides[-1])
             slide_ids.insert(1, slides[-1])
 
-            detail_slide.shapes.title.text = "Document Details"
+            if detail_slide.shapes.title:
+                detail_slide.shapes.title.text = "Document Details"
 
-            tf = detail_slide.placeholders[1].text_frame
+            left = prs.slide_width * 0.1
+            top = prs.slide_height * 0.3
+            width = prs.slide_width * 0.8
+            height = prs.slide_height * 0.5
+
+            textbox = detail_slide.shapes.add_textbox(left, top, width, height)
+            tf = textbox.text_frame
             tf.clear()
 
             details = [
@@ -103,6 +107,7 @@ async def download_doc(
 
         return FileResponse(
             output_path,
+            media_type="application/octet-stream",
             headers={
                 "Content-Disposition": f'attachment; filename="{file.filename}"'
             }
