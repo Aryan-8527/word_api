@@ -24,23 +24,36 @@ async def download_doc(
         temp_dir = tempfile.mkdtemp()
         input_path = os.path.join(temp_dir, file.filename)
 
+        # Save uploaded file
         with open(input_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
 
         ext = os.path.splitext(file.filename)[1].lower()
 
-        # ================= DOCX =================
+        # =====================================================
+        # ================= DOCX ===============================
+        # =====================================================
         if ext == ".docx":
 
             doc = Document(input_path)
 
-            doc.add_page_break()
+            # Find first page break
+            insert_index = None
+            for i, para in enumerate(doc.paragraphs):
+                if "w:br" in para._p.xml:
+                    insert_index = i + 1
+                    break
+
+            if insert_index is None:
+                insert_index = 1  # fallback
+
+            # Create details paragraphs
+            new_paragraphs = []
 
             title_para = doc.add_paragraph()
             run = title_para.add_run("Document Details")
             run.bold = True
-
-            doc.add_paragraph("")
+            new_paragraphs.append(title_para)
 
             details = [
                 f"Document Code: {document_code}",
@@ -53,19 +66,29 @@ async def download_doc(
             ]
 
             for d in details:
-                doc.add_paragraph(d)
+                new_paragraphs.append(doc.add_paragraph(d))
+
+            # Move paragraphs to correct position
+            body = doc._body._element
+            for para in reversed(new_paragraphs):
+                body.remove(para._p)
+                body.insert(insert_index, para._p)
 
             output_path = os.path.join(temp_dir, file.filename)
             doc.save(output_path)
 
-        # ================= PPTX =================
+        # =====================================================
+        # ================= PPTX ===============================
+        # =====================================================
         elif ext == ".pptx":
 
             prs = Presentation(input_path)
 
+            # Use same layout as first slide
             first_layout = prs.slides[0].slide_layout
             detail_slide = prs.slides.add_slide(first_layout)
 
+            # Move slide to 2nd position
             slide_ids = prs.slides._sldIdLst
             slides = list(slide_ids)
             slide_ids.remove(slides[-1])
