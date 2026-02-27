@@ -1,35 +1,11 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from docx import Document
 from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 import tempfile, os, shutil
 
 app = FastAPI()
-
-# =========================
-# PPT TEXT COPY (SAFE)
-# =========================
-def copy_textbox_safe(src_shape, dst_slide):
-    tb = dst_slide.shapes.add_textbox(
-        src_shape.left, src_shape.top,
-        src_shape.width, src_shape.height
-    )
-    tf = tb.text_frame
-    tf.clear()
-
-    for p in src_shape.text_frame.paragraphs:
-        new_p = tf.add_paragraph()
-        new_p.alignment = p.alignment
-
-        for r in p.runs:
-            new_r = new_p.add_run()
-            new_r.text = r.text
-            new_r.font.name = r.font.name
-            new_r.font.size = r.font.size
-            new_r.font.bold = r.font.bold
-            new_r.font.italic = r.font.italic
-            new_r.font.underline = r.font.underline
-            # DO NOT copy color
 
 
 @app.post("/download-doc")
@@ -43,113 +19,117 @@ async def download_doc(
     created_on: str = Form(""),
     created_by: str = Form("")
 ):
-    temp_dir = tempfile.mkdtemp()
-    input_path = os.path.join(temp_dir, file.filename)
+    try:
+        temp_dir = tempfile.mkdtemp()
+        input_path = os.path.join(temp_dir, file.filename)
 
-    with open(input_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+        with open(input_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
 
-    ext = os.path.splitext(file.filename)[1].lower()
+        ext = os.path.splitext(file.filename)[1].lower()
 
-    # =====================================================
-    # ================= WORD (.DOCX) ======================
-    # =====================================================
-    if ext == ".docx":
-        src = Document(input_path)
-        out = Document()
+        # =====================================================
+        # ================= WORD (.DOCX) ======================
+        # =====================================================
+        if ext == ".docx":
 
-        page_1 = []
-        page_rest = []
-        first_page_done = False
+            # 🔥 OPEN ORIGINAL DOCUMENT (keeps images)
+            doc = Document(input_path)
 
-        for para in src.paragraphs:
-            if not first_page_done:
-                page_1.append(para.text)
-            else:
-                page_rest.append(para.text)
+            # Add page break at end of first page
+            doc.add_page_break()
 
-            if para._p.xpath(".//w:br[@w:type='page']"):
-                first_page_done = True
+            # Add Document Details Page
+            doc.add_heading("Document Details", level=1)
 
-        # Page 1
-        for line in page_1:
-            out.add_paragraph(line)
+            def add(label, val):
+                doc.add_paragraph(f"{label}: {val}")
 
-        out.add_page_break()
+            add("Document Code", document_code)
+            add("Client Name", client_name)
+            add("Department", department)
+            add("Document Type", document_type)
+            add("Purpose", purpose)
+            add("Created On", created_on)
+            add("Created By", created_by)
 
-        # Page 2 – Document Details
-        out.add_heading("Document Details", level=1)
+            output_path = os.path.join(temp_dir, file.filename)
+            doc.save(output_path)
 
-        def add(label, val):
-            out.add_paragraph(f"{label}: {val}")
+        # =====================================================
+        # ================= PPT (.PPTX) =======================
+        # =====================================================
+        elif ext == ".pptx":
 
-        add("Document Code", document_code)
-        add("Client Name", client_name)
-        add("Department", department)
-        add("Document Type", document_type)
-        add("Purpose", purpose)
-        add("Created On", created_on)
-        add("Created By", created_by)
+            src = Presentation(input_path)
+            out = Presentation()
 
-        out.add_page_break()
+            blank_layout = out.slide_layouts[6]
 
-        # Remaining pages
-        for line in page_rest:
-            out.add_paragraph(line)
+            # 🔥 COPY ALL ORIGINAL SLIDES (INCLUDING IMAGES)
+            for slide in src.slides:
+                new_slide = out.slides.add_slide(blank_layout)
 
-        output_path = os.path.join(temp_dir, file.filename)
-        out.save(output_path)
+                for shape in slide.shapes:
 
-    # =====================================================
-    # ================= PPT (.PPTX) =======================
-    # =====================================================
-    elif ext == ".pptx":
-        src = Presentation(input_path)
-        out = Presentation()
+                    # Copy Text
+                    if shape.has_text_frame:
+                        textbox = new_slide.shapes.add_textbox(
+                            shape.left, shape.top,
+                            shape.width, shape.height
+                        )
+                        textbox.text_frame.text = shape.text
 
-        blank = out.slide_layouts[6]
+                    # Copy Images
+                    if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                        image = shape.image
+                        image_bytes = image.blob
 
-        # Slide 1
-        s1 = out.slides.add_slide(blank)
-        for shp in src.slides[0].shapes:
-            if shp.has_text_frame:
-                copy_textbox_safe(shp, s1)
+                        temp_img_path = os.path.join(temp_dir, "temp_img.png")
+                        with open(temp_img_path, "wb") as f:
+                            f.write(image_bytes)
 
-        # Slide 2 – Document Details
-        s2 = out.slides.add_slide(out.slide_layouts[1])
-        s2.shapes.title.text = "Document Details"
-        tf = s2.placeholders[1].text_frame
-        tf.clear()
+                        new_slide.shapes.add_picture(
+                            temp_img_path,
+                            shape.left,
+                            shape.top,
+                            shape.width,
+                            shape.height
+                        )
 
-        for text in [
-            f"Document Code: {document_code}",
-            f"Client Name: {client_name}",
-            f"Department: {department}",
-            f"Document Type: {document_type}",
-            f"Purpose: {purpose}",
-            f"Created On: {created_on}",
-            f"Created By: {created_by}",
-        ]:
-            p = tf.add_paragraph()
-            p.text = text
+            # 🔥 ADD DOCUMENT DETAILS AS SECOND SLIDE
+            detail_slide = out.slides.add_slide(out.slide_layouts[1])
+            detail_slide.shapes.title.text = "Document Details"
 
-        # Remaining slides
-        for i in range(1, len(src.slides)):
-            s = out.slides.add_slide(blank)
-            for shp in src.slides[i].shapes:
-                if shp.has_text_frame:
-                    copy_textbox_safe(shp, s)
+            tf = detail_slide.placeholders[1].text_frame
+            tf.clear()
 
-        output_path = os.path.join(temp_dir, file.filename)
-        out.save(output_path)
+            details = [
+                f"Document Code: {document_code}",
+                f"Client Name: {client_name}",
+                f"Department: {department}",
+                f"Document Type: {document_type}",
+                f"Purpose: {purpose}",
+                f"Created On: {created_on}",
+                f"Created By: {created_by}",
+            ]
 
-    else:
-        raise Exception("Unsupported file type")
+            for d in details:
+                p = tf.add_paragraph()
+                p.text = d
 
-    return FileResponse(
-        output_path,
-        headers={
-            "Content-Disposition": f'attachment; filename="{file.filename}"'
-        }
-    )
+            output_path = os.path.join(temp_dir, file.filename)
+            out.save(output_path)
 
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported file type")
+
+        return FileResponse(
+            output_path,
+            headers={
+                "Content-Disposition": f'attachment; filename="{file.filename}"'
+            }
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
