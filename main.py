@@ -61,65 +61,40 @@ async def download_doc(
         # =====================================================
         elif ext == ".pptx":
 
-            src = Presentation(input_path)
-            out = Presentation()
+    prs = Presentation(input_path)
 
-            blank_layout = out.slide_layouts[6]
+    # Create Document Details slide
+    layout = prs.slide_layouts[1]  # Title + Content layout
+    detail_slide = prs.slides.add_slide(layout)
 
-            # 🔥 COPY ALL ORIGINAL SLIDES (INCLUDING IMAGES)
-            for slide in src.slides:
-                new_slide = out.slides.add_slide(blank_layout)
+    # Move slide to position 2 (index 1)
+    xml_slides = prs.slides._sldIdLst
+    slides = list(xml_slides)
+    xml_slides.remove(slides[-1])
+    xml_slides.insert(1, slides[-1])
 
-                for shape in slide.shapes:
+    # Add content
+    detail_slide.shapes.title.text = "Document Details"
 
-                    # Copy Text
-                    if shape.has_text_frame:
-                        textbox = new_slide.shapes.add_textbox(
-                            shape.left, shape.top,
-                            shape.width, shape.height
-                        )
-                        textbox.text_frame.text = shape.text
+    tf = detail_slide.placeholders[1].text_frame
+    tf.clear()
 
-                    # Copy Images
-                    if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
-                        image = shape.image
-                        image_bytes = image.blob
+    details = [
+        f"Document Code: {document_code}",
+        f"Client Name: {client_name}",
+        f"Department: {department}",
+        f"Document Type: {document_type}",
+        f"Purpose: {purpose}",
+        f"Created On: {created_on}",
+        f"Created By: {created_by}",
+    ]
 
-                        temp_img_path = os.path.join(temp_dir, "temp_img.png")
-                        with open(temp_img_path, "wb") as f:
-                            f.write(image_bytes)
+    for d in details:
+        p = tf.add_paragraph()
+        p.text = d
 
-                        new_slide.shapes.add_picture(
-                            temp_img_path,
-                            shape.left,
-                            shape.top,
-                            shape.width,
-                            shape.height
-                        )
-
-            # 🔥 ADD DOCUMENT DETAILS AS SECOND SLIDE
-            detail_slide = out.slides.add_slide(out.slide_layouts[1])
-            detail_slide.shapes.title.text = "Document Details"
-
-            tf = detail_slide.placeholders[1].text_frame
-            tf.clear()
-
-            details = [
-                f"Document Code: {document_code}",
-                f"Client Name: {client_name}",
-                f"Department: {department}",
-                f"Document Type: {document_type}",
-                f"Purpose: {purpose}",
-                f"Created On: {created_on}",
-                f"Created By: {created_by}",
-            ]
-
-            for d in details:
-                p = tf.add_paragraph()
-                p.text = d
-
-            output_path = os.path.join(temp_dir, file.filename)
-            out.save(output_path)
+    output_path = os.path.join(temp_dir, file.filename)
+    prs.save(output_path)
 
         else:
             raise HTTPException(status_code=400, detail="Unsupported file type")
@@ -133,3 +108,4 @@ async def download_doc(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
