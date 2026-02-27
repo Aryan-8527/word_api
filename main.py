@@ -30,49 +30,42 @@ async def download_doc(
 
         ext = os.path.splitext(file.filename)[1].lower()
 
-        # =====================================================
-        # ================= DOCX ===============================
-        # =====================================================
-       if ext == ".docx":
+        # ================= DOCX =================
+        if ext == ".docx":
 
-    doc = Document(input_path)
+            doc = Document(input_path)
 
-    # Create page break after first page
-    doc.paragraphs[0].insert_paragraph_after().add_run().add_break()
+            # Insert page break after first paragraph
+            if len(doc.paragraphs) > 0:
+                doc.paragraphs[0].insert_paragraph_after().add_run().add_break()
 
-    # Insert new paragraph for heading
-    heading = doc.paragraphs[1].insert_paragraph_before("Document Details")
-    heading.runs[0].bold = True
+            # Insert Document Details content
+            details = [
+                "Document Details",
+                f"Document Code: {document_code}",
+                f"Client Name: {client_name}",
+                f"Department: {department}",
+                f"Document Type: {document_type}",
+                f"Purpose: {purpose}",
+                f"Created On: {created_on}",
+                f"Created By: {created_by}",
+            ]
 
-    # Insert details
-    details = [
-        f"Document Code: {document_code}",
-        f"Client Name: {client_name}",
-        f"Department: {department}",
-        f"Document Type: {document_type}",
-        f"Purpose: {purpose}",
-        f"Created On: {created_on}",
-        f"Created By: {created_by}",
-    ]
+            for text in reversed(details):
+                doc.paragraphs[1].insert_paragraph_before(text)
 
-    for text in reversed(details):
-        doc.paragraphs[1].insert_paragraph_before(text)
+            output_path = os.path.join(temp_dir, file.filename)
+            doc.save(output_path)
 
-    output_path = os.path.join(temp_dir, file.filename)
-    doc.save(output_path)
-
-        # =====================================================
-        # ================= PPTX ===============================
-        # =====================================================
+        # ================= PPTX =================
         elif ext == ".pptx":
 
             prs = Presentation(input_path)
 
-            # Add new slide using existing layout
             layout = prs.slide_layouts[1]
             detail_slide = prs.slides.add_slide(layout)
 
-            # Move slide to second position
+            # Move new slide to 2nd position
             slide_ids = prs.slides._sldIdLst
             slides = list(slide_ids)
             slide_ids.remove(slides[-1])
@@ -112,4 +105,3 @@ async def download_doc(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
