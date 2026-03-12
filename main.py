@@ -1,8 +1,11 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from docx import Document
-from docx.enum.section import WD_SECTION
+from docx.shared import Pt
+from docx.enum.text import WD_BREAK, WD_ALIGN_PARAGRAPH  # UPDATED
+from docx.oxml.ns import qn
 from pptx import Presentation
+from pptx.util import Pt as PPTPt
 import tempfile
 import os
 import shutil
@@ -22,6 +25,7 @@ async def download_doc(
     created_by: str = Form("")
 ):
     try:
+
         temp_dir = tempfile.mkdtemp()
         input_path = os.path.join(temp_dir, file.filename)
 
@@ -30,74 +34,141 @@ async def download_doc(
 
         ext = os.path.splitext(file.filename)[1].lower()
 
-        # ================= DOCX =================
+        # ==========================================================
+        # DOCX PROCESSING
+        # ==========================================================
         if ext == ".docx":
 
             doc = Document(input_path)
 
-            # STEP 1: Create new section (new page)
-            section = doc.add_section(WD_SECTION.NEW_PAGE)
+            # ------------------------------------------------------
+            # STEP 1 → Find first paragraph
+            # ------------------------------------------------------
+            first_para = doc.paragraphs[0]   # UPDATED
 
-            # STEP 2: Move this section to second position
-            body = doc._body._element
-            new_section = body[-1]
-            body.remove(new_section)
-            body.insert(1, new_section)
+            # ------------------------------------------------------
+            # STEP 2 → Insert HARD PAGE BREAK (forces page 2)
+            # ------------------------------------------------------
+            page_break_para = first_para.insert_paragraph_before()  # UPDATED
 
-            # STEP 3: Add only details in that section
-            p = doc.add_paragraph()
-            p._p.getparent().remove(p._p)
-            body.insert(2, p._p)
+            run = page_break_para.add_run()
+            run.add_break(WD_BREAK.PAGE)  # UPDATED
 
-            p.add_run("Document Details\n\n").bold = True
-            p.add_run(f"Document Code: {document_code}\n")
-            p.add_run(f"Client Name: {client_name}\n")
-            p.add_run(f"Department: {department}\n")
-            p.add_run(f"Document Type: {document_type}\n")
-            p.add_run(f"Purpose: {purpose}\n")
-            p.add_run(f"Created On: {created_on}\n")
-            p.add_run(f"Created By: {created_by}\n")
+            # ------------------------------------------------------
+            # STEP 3 → DOCUMENT DETAILS HEADING
+            # ------------------------------------------------------
+            heading = page_break_para.insert_paragraph_before()  # UPDATED
+
+            run = heading.add_run("DOCUMENT DETAILS")
+
+            run.bold = True
+            run.underline = True
+            run.font.name = "Arial"
+            run.font.size = Pt(22)
+
+            heading.alignment = WD_ALIGN_PARAGRAPH.CENTER  # UPDATED
+
+            r = run._element
+            r.rPr.rFonts.set(qn('w:eastAsia'), 'Arial')
+
+            # ------------------------------------------------------
+            # STEP 4 → DETAILS CONTENT
+            # ------------------------------------------------------
+            details_para = heading.insert_paragraph_after()  # UPDATED
+
+            details_list = [
+                f"Document Code : {document_code}",
+                f"Client Name : {client_name}",
+                f"Department : {department}",
+                f"Document Type : {document_type}",
+                f"Purpose : {purpose}",
+                f"Created On : {created_on}",
+                f"Created By : {created_by}"
+            ]
+
+            for d in details_list:
+
+                run = details_para.add_run(d + "\n")
+
+                run.font.name = "Arial"
+                run.font.size = Pt(16)
+
+                r = run._element
+                r.rPr.rFonts.set(qn('w:eastAsia'), 'Arial')
+
+            # ------------------------------------------------------
+            # STEP 5 → LINE SPACING
+            # ------------------------------------------------------
+            details_para.paragraph_format.line_spacing = 2  # UPDATED
 
             output_path = os.path.join(temp_dir, file.filename)
             doc.save(output_path)
 
-        # ================= PPTX =================
+        # ==========================================================
+        # PPTX PROCESSING
+        # ==========================================================
         elif ext == ".pptx":
 
             prs = Presentation(input_path)
-            layout = prs.slides[0].slide_layout
+
+            # Use Title + Content layout
+            layout = prs.slide_layouts[1]  # UPDATED
+
             detail_slide = prs.slides.add_slide(layout)
 
+            # ------------------------------------------------------
+            # Move slide to position 2
+            # ------------------------------------------------------
             slide_ids = prs.slides._sldIdLst
             slides = list(slide_ids)
+
             slide_ids.remove(slides[-1])
             slide_ids.insert(1, slides[-1])
 
+            # ------------------------------------------------------
+            # TITLE
+            # ------------------------------------------------------
             if detail_slide.shapes.title:
-                detail_slide.shapes.title.text = "Document Details"
 
-            left = prs.slide_width * 0.1
-            top = prs.slide_height * 0.3
-            width = prs.slide_width * 0.8
-            height = prs.slide_height * 0.5
+                title = detail_slide.shapes.title
+                title.text = "DOCUMENT DETAILS"
 
-            textbox = detail_slide.shapes.add_textbox(left, top, width, height)
-            tf = textbox.text_frame
+                for paragraph in title.text_frame.paragraphs:
+                    for run in paragraph.runs:
+                        run.font.name = "Arial"
+                        run.font.size = PPTPt(40)
+
+            # ------------------------------------------------------
+            # CONTENT BULLET LIST
+            # ------------------------------------------------------
+            body_shape = detail_slide.placeholders[1]
+
+            tf = body_shape.text_frame
             tf.clear()
 
             details = [
-                f"Document Code: {document_code}",
-                f"Client Name: {client_name}",
-                f"Department: {department}",
-                f"Document Type: {document_type}",
-                f"Purpose: {purpose}",
-                f"Created On: {created_on}",
-                f"Created By: {created_by}",
+                f"Document Code : {document_code}",
+                f"Client Name : {client_name}",
+                f"Department : {department}",
+                f"Document Type : {document_type}",
+                f"Purpose : {purpose}",
+                f"Created On : {created_on}",
+                f"Created By : {created_by}",
             ]
 
-            for d in details:
-                p = tf.add_paragraph()
+            for i, d in enumerate(details):
+
+                if i == 0:
+                    p = tf.paragraphs[0]
+                else:
+                    p = tf.add_paragraph()
+
                 p.text = d
+                p.level = 0  # bullet
+
+                for run in p.runs:
+                    run.font.name = "Arial"
+                    run.font.size = PPTPt(24)
 
             output_path = os.path.join(temp_dir, file.filename)
             prs.save(output_path)
@@ -105,6 +176,9 @@ async def download_doc(
         else:
             raise HTTPException(status_code=400, detail="Only DOCX and PPTX supported")
 
+        # ==========================================================
+        # RETURN FILE
+        # ==========================================================
         return FileResponse(
             output_path,
             media_type="application/octet-stream",
