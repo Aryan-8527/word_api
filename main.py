@@ -1,11 +1,12 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from docx import Document
-from docx.shared import Pt
-from docx.enum.text import WD_BREAK, WD_ALIGN_PARAGRAPH  # UPDATED
-from docx.oxml.ns import qn
+from docx.enum.section import WD_SECTION
+from docx.shared import Pt  # UPDATED
+from docx.oxml import OxmlElement  # UPDATED
+from docx.oxml.ns import qn  # UPDATED
 from pptx import Presentation
-from pptx.util import Pt as PPTPt
+from pptx.util import Pt as PPTPt  # UPDATED
 import tempfile
 import os
 import shutil
@@ -25,7 +26,6 @@ async def download_doc(
     created_by: str = Form("")
 ):
     try:
-
         temp_dir = tempfile.mkdtemp()
         input_path = os.path.join(temp_dir, file.filename)
 
@@ -34,47 +34,40 @@ async def download_doc(
 
         ext = os.path.splitext(file.filename)[1].lower()
 
-        # ==========================================================
-        # DOCX PROCESSING
-        # ==========================================================
+        # ================= DOCX =================
         if ext == ".docx":
 
             doc = Document(input_path)
 
-            # ------------------------------------------------------
-            # STEP 1 → Find first paragraph
-            # ------------------------------------------------------
-            first_para = doc.paragraphs[0]   # UPDATED
+            # STEP 1: Create new section (new page)
+            section = doc.add_section(WD_SECTION.NEW_PAGE)
 
-            # ------------------------------------------------------
-            # STEP 2 → Insert HARD PAGE BREAK (forces page 2)
-            # ------------------------------------------------------
-            page_break_para = first_para.insert_paragraph_before()  # UPDATED
+            # STEP 2: Move this section to second position
+            body = doc._body._element
+            new_section = body[-1]
+            body.remove(new_section)
+            body.insert(1, new_section)
 
-            run = page_break_para.add_run()
-            run.add_break(WD_BREAK.PAGE)  # UPDATED
-
-            # ------------------------------------------------------
-            # STEP 3 → DOCUMENT DETAILS HEADING
-            # ------------------------------------------------------
-            heading = page_break_para.insert_paragraph_before()  # UPDATED
+            # STEP 3: Create Heading paragraph
+            heading = doc.add_paragraph()
+            heading._p.getparent().remove(heading._p)
+            body.insert(2, heading._p)
 
             run = heading.add_run("DOCUMENT DETAILS")
-
             run.bold = True
             run.underline = True
-            run.font.name = "Arial"
-            run.font.size = Pt(22)
+            run.font.name = "Arial"  # UPDATED
+            run.font.size = Pt(22)  # UPDATED
+            heading.alignment = 1  # center  # UPDATED
 
-            heading.alignment = WD_ALIGN_PARAGRAPH.CENTER  # UPDATED
-
+            # force Arial (Word XML compatibility)
             r = run._element
-            r.rPr.rFonts.set(qn('w:eastAsia'), 'Arial')
+            r.rPr.rFonts.set(qn('w:eastAsia'), 'Arial')  # UPDATED
 
-            # ------------------------------------------------------
-            # STEP 4 → DETAILS CONTENT
-            # ------------------------------------------------------
-            details_para = heading.insert_paragraph_after()  # UPDATED
+            # STEP 4: Create details paragraph
+            details = doc.add_paragraph()
+            details._p.getparent().remove(details._p)
+            body.insert(3, details._p)
 
             details_list = [
                 f"Document Code : {document_code}",
@@ -88,46 +81,36 @@ async def download_doc(
 
             for d in details_list:
 
-                run = details_para.add_run(d + "\n")
-
-                run.font.name = "Arial"
-                run.font.size = Pt(16)
+                run = details.add_run(d + "\n")
+                run.font.name = "Arial"  # UPDATED
+                run.font.size = Pt(16)  # UPDATED
 
                 r = run._element
-                r.rPr.rFonts.set(qn('w:eastAsia'), 'Arial')
+                r.rPr.rFonts.set(qn('w:eastAsia'), 'Arial')  # UPDATED
 
-            # ------------------------------------------------------
-            # STEP 5 → LINE SPACING
-            # ------------------------------------------------------
-            details_para.paragraph_format.line_spacing = 2  # UPDATED
+            # STEP 5: Set line spacing 2.0
+            details.paragraph_format.line_spacing = 2  # UPDATED
 
             output_path = os.path.join(temp_dir, file.filename)
             doc.save(output_path)
 
-        # ==========================================================
-        # PPTX PROCESSING
-        # ==========================================================
+        # ================= PPTX =================
         elif ext == ".pptx":
 
             prs = Presentation(input_path)
 
-            # Use Title + Content layout
-            layout = prs.slide_layouts[1]  # UPDATED
+            # UPDATED → Use Title and Content layout
+            layout = prs.slide_layouts[1]  # Title and Content
 
             detail_slide = prs.slides.add_slide(layout)
 
-            # ------------------------------------------------------
-            # Move slide to position 2
-            # ------------------------------------------------------
+            # Move slide to second position
             slide_ids = prs.slides._sldIdLst
             slides = list(slide_ids)
-
             slide_ids.remove(slides[-1])
             slide_ids.insert(1, slides[-1])
 
-            # ------------------------------------------------------
-            # TITLE
-            # ------------------------------------------------------
+            # ================= TITLE =================
             if detail_slide.shapes.title:
 
                 title = detail_slide.shapes.title
@@ -135,14 +118,11 @@ async def download_doc(
 
                 for paragraph in title.text_frame.paragraphs:
                     for run in paragraph.runs:
-                        run.font.name = "Arial"
-                        run.font.size = PPTPt(40)
+                        run.font.name = "Arial"  # UPDATED
+                        run.font.size = PPTPt(40)  # UPDATED
 
-            # ------------------------------------------------------
-            # CONTENT BULLET LIST
-            # ------------------------------------------------------
+            # ================= CONTENT =================
             body_shape = detail_slide.placeholders[1]
-
             tf = body_shape.text_frame
             tf.clear()
 
@@ -167,8 +147,8 @@ async def download_doc(
                 p.level = 0  # bullet
 
                 for run in p.runs:
-                    run.font.name = "Arial"
-                    run.font.size = PPTPt(24)
+                    run.font.name = "Arial"  # UPDATED
+                    run.font.size = PPTPt(24)  # UPDATED
 
             output_path = os.path.join(temp_dir, file.filename)
             prs.save(output_path)
@@ -176,9 +156,6 @@ async def download_doc(
         else:
             raise HTTPException(status_code=400, detail="Only DOCX and PPTX supported")
 
-        # ==========================================================
-        # RETURN FILE
-        # ==========================================================
         return FileResponse(
             output_path,
             media_type="application/octet-stream",
