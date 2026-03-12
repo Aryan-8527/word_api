@@ -1,17 +1,89 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from docx import Document
-from docx.shared import Pt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
 from pptx import Presentation
-from pptx.util import Pt as PPTPt
 import tempfile
-import os
 import shutil
+import os
 
 app = FastAPI()
+
+DOCX_TEMPLATE = "DCS_TEMPLATE.docx"
+PPT_TEMPLATE = "DCS_TEMPLATE.pptx"
+
+
+# -----------------------------
+# REPLACE PLACEHOLDERS DOCX
+# -----------------------------
+def replace_docx_placeholders(doc, data):
+
+    for p in doc.paragraphs:
+        for key, value in data.items():
+            if key in p.text:
+                p.text = p.text.replace(key, value)
+
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for key, value in data.items():
+                    if key in cell.text:
+                        cell.text = cell.text.replace(key, value)
+
+
+# -----------------------------
+# APPEND DOCX DOCUMENT
+# -----------------------------
+def append_docx(template_doc, uploaded_doc):
+
+    for element in uploaded_doc.element.body:
+        template_doc.element.body.append(element)
+
+
+# -----------------------------
+# REPLACE PPT PLACEHOLDERS
+# -----------------------------
+def replace_ppt_placeholders(prs, data):
+
+    slide = prs.slides[0]
+
+    for shape in slide.shapes:
+
+        if not shape.has_text_frame:
+            continue
+
+        for paragraph in shape.text_frame.paragraphs:
+
+            for key, value in data.items():
+                if key in paragraph.text:
+                    paragraph.text = paragraph.text.replace(key, value)
+
+
+# -----------------------------
+# COPY SLIDES FROM USER PPT
+# -----------------------------
+def copy_user_slides(template_prs, user_prs):
+
+    for slide in user_prs.slides:
+
+        layout = template_prs.slide_layouts[6]  # blank layout
+        new_slide = template_prs.slides.add_slide(layout)
+
+        for shape in slide.shapes:
+
+            if shape.has_text_frame:
+                textbox = new_slide.shapes.add_textbox(
+                    shape.left,
+                    shape.top,
+                    shape.width,
+                    shape.height
+                )
+
+                tf = textbox.text_frame
+
+                for paragraph in shape.text_frame.paragraphs:
+                    p = tf.add_paragraph()
+                    p.text = paragraph.text
+                    p.level = paragraph.level
 
 
 @app.post("/download-doc")
@@ -29,6 +101,7 @@ async def download_doc(
     try:
 
         temp_dir = tempfile.mkdtemp()
+
         input_path = os.path.join(temp_dir, file.filename)
 
         with open(input_path, "wb") as f:
@@ -36,125 +109,55 @@ async def download_doc(
 
         ext = os.path.splitext(file.filename)[1].lower()
 
-        # ================= WORD =================
+        data = {
+            "{{DOCUMENT_CODE}}": document_code,
+            "{{CLIENT_NAME}}": client_name,
+            "{{DEPARTMENT}}": department,
+            "{{DOCUMENT_TYPE}}": document_type,
+            "{{PURPOSE}}": purpose,
+            "{{CREATED_ON}}": created_on,
+            "{{CREATED_BY}}": created_by
+        }
+
+        # =========================
+        # WORD DOCUMENT
+        # =========================
         if ext == ".docx":
 
-            doc = Document(input_path)
+            template_doc = Document(DOCX_TEMPLATE)
+            user_doc = Document(input_path)
 
-            body = doc._element.body
+            replace_docx_placeholders(template_doc, data)
 
-            # -------------------------
-            # PAGE BREAK ELEMENT
-            # -------------------------
-            page_break = OxmlElement("w:p")
-            run = OxmlElement("w:r")
-            br = OxmlElement("w:br")
-            br.set(qn("w:type"), "page")
-            run.append(br)
-            page_break.append(run)
+            template_doc.add_page_break()
 
-            # -------------------------
-            # HEADING
-            # -------------------------
-            heading_para = doc.add_paragraph()
-            heading_para.text = "DOCUMENT DETAILS"
-
-            run = heading_para.runs[0]
-            run.bold = True
-            run.underline = True
-            run.font.name = "Arial"
-            run.font.size = Pt(22)
-
-            heading_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-            # -------------------------
-            # DETAILS
-            # -------------------------
-            details_para = doc.add_paragraph()
-            details_para.paragraph_format.line_spacing = 2
-
-            details_list = [
-                f"Document Code : {document_code}",
-                f"Client Name : {client_name}",
-                f"Department : {department}",
-                f"Document Type : {document_type}",
-                f"Purpose : {purpose}",
-                f"Created On : {created_on}",
-                f"Created By : {created_by}",
-            ]
-
-            for d in details_list:
-                r = details_para.add_run(d + "\n")
-                r.font.name = "Arial"
-                r.font.size = Pt(16)
-
-            # -------------------------
-            # MOVE ELEMENTS TO TOP
-            # -------------------------
-            body.insert(0, page_break)
-            body.insert(0, details_para._p)
-            body.insert(0, heading_para._p)
+            append_docx(template_doc, user_doc)
 
             output_path = os.path.join(temp_dir, file.filename)
-            doc.save(output_path)
 
-        # ================= PPT =================
+            template_doc.save(output_path)
+
+        # =========================
+        # POWERPOINT
+        # =========================
         elif ext == ".pptx":
 
-            prs = Presentation(input_path)
+            template_prs = Presentation(PPT_TEMPLATE)
+            user_prs = Presentation(input_path)
 
-            layout = prs.slide_layouts[1]
-            detail_slide = prs.slides.add_slide(layout)
+            replace_ppt_placeholders(template_prs, data)
 
-            slide_ids = prs.slides._sldIdLst
-            slides = list(slide_ids)
-
-            slide_ids.remove(slides[-1])
-            slide_ids.insert(1, slides[-1])
-
-            if detail_slide.shapes.title:
-
-                title = detail_slide.shapes.title
-                title.text = "DOCUMENT DETAILS"
-
-                for paragraph in title.text_frame.paragraphs:
-                    for run in paragraph.runs:
-                        run.font.name = "Arial"
-                        run.font.size = PPTPt(40)
-
-            body_shape = detail_slide.placeholders[1]
-            tf = body_shape.text_frame
-            tf.clear()
-
-            details = [
-                f"Document Code : {document_code}",
-                f"Client Name : {client_name}",
-                f"Department : {department}",
-                f"Document Type : {document_type}",
-                f"Purpose : {purpose}",
-                f"Created On : {created_on}",
-                f"Created By : {created_by}",
-            ]
-
-            for i, d in enumerate(details):
-
-                if i == 0:
-                    p = tf.paragraphs[0]
-                else:
-                    p = tf.add_paragraph()
-
-                p.text = d
-                p.level = 0
-
-                for run in p.runs:
-                    run.font.name = "Arial"
-                    run.font.size = PPTPt(24)
+            copy_user_slides(template_prs, user_prs)
 
             output_path = os.path.join(temp_dir, file.filename)
-            prs.save(output_path)
+
+            template_prs.save(output_path)
 
         else:
-            raise HTTPException(status_code=400, detail="Only DOCX and PPTX supported")
+            raise HTTPException(
+                status_code=400,
+                detail="Only DOCX and PPTX supported"
+            )
 
         return FileResponse(
             output_path,
