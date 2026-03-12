@@ -35,18 +35,33 @@ async def download_doc(
 
         ext = os.path.splitext(file.filename)[1].lower()
 
-        # ================= DOCX =================
+        # =====================================================
+        # DOCX PROCESSING
+        # =====================================================
         if ext == ".docx":
 
             doc = Document(input_path)
 
-            # STEP 1: Add page break after page 1
+            body = doc._body._element
+
+            # -------------------------------------------------
+            # STEP 1: CREATE PAGE BREAK
+            # -------------------------------------------------
             page_break_para = doc.add_paragraph()
             run = page_break_para.add_run()
             run.add_break(WD_BREAK.PAGE)
 
-            # STEP 2: Heading
+            # move page break to position after first element
+            body.remove(page_break_para._element)
+            body.insert(1, page_break_para._element)
+
+            # -------------------------------------------------
+            # STEP 2: CREATE HEADING
+            # -------------------------------------------------
             heading = doc.add_paragraph()
+
+            body.remove(heading._element)
+            body.insert(2, heading._element)
 
             run = heading.add_run("DOCUMENT DETAILS")
 
@@ -60,8 +75,13 @@ async def download_doc(
             r = run._element
             r.rPr.rFonts.set(qn('w:eastAsia'), 'Arial')
 
-            # STEP 3: Details
+            # -------------------------------------------------
+            # STEP 3: CREATE DETAILS CONTENT
+            # -------------------------------------------------
             details_para = doc.add_paragraph()
+
+            body.remove(details_para._element)
+            body.insert(3, details_para._element)
 
             details_para.paragraph_format.line_spacing = 2
 
@@ -88,7 +108,9 @@ async def download_doc(
             output_path = os.path.join(temp_dir, file.filename)
             doc.save(output_path)
 
-        # ================= PPTX =================
+        # =====================================================
+        # PPTX PROCESSING
+        # =====================================================
         elif ext == ".pptx":
 
             prs = Presentation(input_path)
@@ -148,6 +170,9 @@ async def download_doc(
         else:
             raise HTTPException(status_code=400, detail="Only DOCX and PPTX supported")
 
+        # =====================================================
+        # RETURN FILE
+        # =====================================================
         return FileResponse(
             output_path,
             media_type="application/octet-stream",
