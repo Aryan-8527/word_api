@@ -3,6 +3,7 @@ from fastapi.responses import FileResponse
 from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from pptx import Presentation
 from pptx.util import Pt as PPTPt
@@ -35,36 +36,41 @@ async def download_doc(
 
         ext = os.path.splitext(file.filename)[1].lower()
 
-        # =========================================================
-        # WORD DOCUMENT PROCESSING
-        # =========================================================
+        # ================= WORD =================
         if ext == ".docx":
 
-            original_doc = Document(input_path)
+            doc = Document(input_path)
 
-            # ----------------------------------------------
-            # CREATE NEW DOCUMENT
-            # ----------------------------------------------
-            new_doc = Document()
+            body = doc._element.body
 
-            # ----------------------------------------------
-            # PAGE 1 → DOCUMENT DETAILS
-            # ----------------------------------------------
-            heading = new_doc.add_paragraph()
+            # -------------------------
+            # PAGE BREAK ELEMENT
+            # -------------------------
+            page_break = OxmlElement("w:p")
+            run = OxmlElement("w:r")
+            br = OxmlElement("w:br")
+            br.set(qn("w:type"), "page")
+            run.append(br)
+            page_break.append(run)
 
-            run = heading.add_run("DOCUMENT DETAILS")
+            # -------------------------
+            # HEADING
+            # -------------------------
+            heading_para = doc.add_paragraph()
+            heading_para.text = "DOCUMENT DETAILS"
 
+            run = heading_para.runs[0]
             run.bold = True
             run.underline = True
             run.font.name = "Arial"
             run.font.size = Pt(22)
 
-            heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            heading_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-            r = run._element
-            r.rPr.rFonts.set(qn('w:eastAsia'), 'Arial')
-
-            details_para = new_doc.add_paragraph()
+            # -------------------------
+            # DETAILS
+            # -------------------------
+            details_para = doc.add_paragraph()
             details_para.paragraph_format.line_spacing = 2
 
             details_list = [
@@ -74,36 +80,25 @@ async def download_doc(
                 f"Document Type : {document_type}",
                 f"Purpose : {purpose}",
                 f"Created On : {created_on}",
-                f"Created By : {created_by}"
+                f"Created By : {created_by}",
             ]
 
             for d in details_list:
+                r = details_para.add_run(d + "\n")
+                r.font.name = "Arial"
+                r.font.size = Pt(16)
 
-                run = details_para.add_run(d + "\n")
-
-                run.font.name = "Arial"
-                run.font.size = Pt(16)
-
-                r = run._element
-                r.rPr.rFonts.set(qn('w:eastAsia'), 'Arial')
-
-            # ----------------------------------------------
-            # PAGE BREAK AFTER DETAILS PAGE
-            # ----------------------------------------------
-            new_doc.add_page_break()
-
-            # ----------------------------------------------
-            # APPEND ORIGINAL DOCUMENT CONTENT
-            # ----------------------------------------------
-            for element in original_doc.element.body:
-                new_doc.element.body.append(element)
+            # -------------------------
+            # MOVE ELEMENTS TO TOP
+            # -------------------------
+            body.insert(0, page_break)
+            body.insert(0, details_para._p)
+            body.insert(0, heading_para._p)
 
             output_path = os.path.join(temp_dir, file.filename)
-            new_doc.save(output_path)
+            doc.save(output_path)
 
-        # =========================================================
-        # POWERPOINT PROCESSING
-        # =========================================================
+        # ================= PPT =================
         elif ext == ".pptx":
 
             prs = Presentation(input_path)
@@ -117,7 +112,6 @@ async def download_doc(
             slide_ids.remove(slides[-1])
             slide_ids.insert(1, slides[-1])
 
-            # TITLE
             if detail_slide.shapes.title:
 
                 title = detail_slide.shapes.title
@@ -128,7 +122,6 @@ async def download_doc(
                         run.font.name = "Arial"
                         run.font.size = PPTPt(40)
 
-            # CONTENT
             body_shape = detail_slide.placeholders[1]
             tf = body_shape.text_frame
             tf.clear()
@@ -163,9 +156,6 @@ async def download_doc(
         else:
             raise HTTPException(status_code=400, detail="Only DOCX and PPTX supported")
 
-        # =========================================================
-        # RETURN FILE
-        # =========================================================
         return FileResponse(
             output_path,
             media_type="application/octet-stream",
