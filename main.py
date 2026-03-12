@@ -2,7 +2,7 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from docx import Document
 from docx.shared import Pt
-from docx.enum.text import WD_BREAK, WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from pptx import Presentation
 from pptx.util import Pt as PPTPt
@@ -35,33 +35,22 @@ async def download_doc(
 
         ext = os.path.splitext(file.filename)[1].lower()
 
-        # =====================================================
-        # DOCX PROCESSING
-        # =====================================================
+        # =========================================================
+        # WORD DOCUMENT PROCESSING
+        # =========================================================
         if ext == ".docx":
 
-            doc = Document(input_path)
+            original_doc = Document(input_path)
 
-            body = doc._body._element
+            # ----------------------------------------------
+            # CREATE NEW DOCUMENT
+            # ----------------------------------------------
+            new_doc = Document()
 
-            # -------------------------------------------------
-            # STEP 1: CREATE PAGE BREAK
-            # -------------------------------------------------
-            page_break_para = doc.add_paragraph()
-            run = page_break_para.add_run()
-            run.add_break(WD_BREAK.PAGE)
-
-            # move page break to position after first element
-            body.remove(page_break_para._element)
-            body.insert(1, page_break_para._element)
-
-            # -------------------------------------------------
-            # STEP 2: CREATE HEADING
-            # -------------------------------------------------
-            heading = doc.add_paragraph()
-
-            body.remove(heading._element)
-            body.insert(2, heading._element)
+            # ----------------------------------------------
+            # PAGE 1 → DOCUMENT DETAILS
+            # ----------------------------------------------
+            heading = new_doc.add_paragraph()
 
             run = heading.add_run("DOCUMENT DETAILS")
 
@@ -75,14 +64,7 @@ async def download_doc(
             r = run._element
             r.rPr.rFonts.set(qn('w:eastAsia'), 'Arial')
 
-            # -------------------------------------------------
-            # STEP 3: CREATE DETAILS CONTENT
-            # -------------------------------------------------
-            details_para = doc.add_paragraph()
-
-            body.remove(details_para._element)
-            body.insert(3, details_para._element)
-
+            details_para = new_doc.add_paragraph()
             details_para.paragraph_format.line_spacing = 2
 
             details_list = [
@@ -105,12 +87,23 @@ async def download_doc(
                 r = run._element
                 r.rPr.rFonts.set(qn('w:eastAsia'), 'Arial')
 
-            output_path = os.path.join(temp_dir, file.filename)
-            doc.save(output_path)
+            # ----------------------------------------------
+            # PAGE BREAK AFTER DETAILS PAGE
+            # ----------------------------------------------
+            new_doc.add_page_break()
 
-        # =====================================================
-        # PPTX PROCESSING
-        # =====================================================
+            # ----------------------------------------------
+            # APPEND ORIGINAL DOCUMENT CONTENT
+            # ----------------------------------------------
+            for element in original_doc.element.body:
+                new_doc.element.body.append(element)
+
+            output_path = os.path.join(temp_dir, file.filename)
+            new_doc.save(output_path)
+
+        # =========================================================
+        # POWERPOINT PROCESSING
+        # =========================================================
         elif ext == ".pptx":
 
             prs = Presentation(input_path)
@@ -170,9 +163,9 @@ async def download_doc(
         else:
             raise HTTPException(status_code=400, detail="Only DOCX and PPTX supported")
 
-        # =====================================================
+        # =========================================================
         # RETURN FILE
-        # =====================================================
+        # =========================================================
         return FileResponse(
             output_path,
             media_type="application/octet-stream",
