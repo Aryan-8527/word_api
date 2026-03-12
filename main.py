@@ -1,12 +1,11 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from docx import Document
-from docx.enum.section import WD_SECTION
-from docx.shared import Pt  # UPDATED
-from docx.oxml import OxmlElement  # UPDATED
-from docx.oxml.ns import qn  # UPDATED
+from docx.shared import Pt
+from docx.enum.text import WD_BREAK, WD_ALIGN_PARAGRAPH
+from docx.oxml.ns import qn
 from pptx import Presentation
-from pptx.util import Pt as PPTPt  # UPDATED
+from pptx.util import Pt as PPTPt
 import tempfile
 import os
 import shutil
@@ -25,7 +24,9 @@ async def download_doc(
     created_on: str = Form(""),
     created_by: str = Form("")
 ):
+
     try:
+
         temp_dir = tempfile.mkdtemp()
         input_path = os.path.join(temp_dir, file.filename)
 
@@ -39,35 +40,30 @@ async def download_doc(
 
             doc = Document(input_path)
 
-            # STEP 1: Create new section (new page)
-            section = doc.add_section(WD_SECTION.NEW_PAGE)
+            # STEP 1: Add page break after page 1
+            page_break_para = doc.add_paragraph()
+            run = page_break_para.add_run()
+            run.add_break(WD_BREAK.PAGE)
 
-            # STEP 2: Move this section to second position
-            body = doc._body._element
-            new_section = body[-1]
-            body.remove(new_section)
-            body.insert(1, new_section)
-
-            # STEP 3: Create Heading paragraph
+            # STEP 2: Heading
             heading = doc.add_paragraph()
-            heading._p.getparent().remove(heading._p)
-            body.insert(2, heading._p)
 
             run = heading.add_run("DOCUMENT DETAILS")
+
             run.bold = True
             run.underline = True
-            run.font.name = "Arial"  # UPDATED
-            run.font.size = Pt(22)  # UPDATED
-            heading.alignment = 1  # center  # UPDATED
+            run.font.name = "Arial"
+            run.font.size = Pt(22)
 
-            # force Arial (Word XML compatibility)
+            heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
             r = run._element
-            r.rPr.rFonts.set(qn('w:eastAsia'), 'Arial')  # UPDATED
+            r.rPr.rFonts.set(qn('w:eastAsia'), 'Arial')
 
-            # STEP 4: Create details paragraph
-            details = doc.add_paragraph()
-            details._p.getparent().remove(details._p)
-            body.insert(3, details._p)
+            # STEP 3: Details
+            details_para = doc.add_paragraph()
+
+            details_para.paragraph_format.line_spacing = 2
 
             details_list = [
                 f"Document Code : {document_code}",
@@ -81,15 +77,13 @@ async def download_doc(
 
             for d in details_list:
 
-                run = details.add_run(d + "\n")
-                run.font.name = "Arial"  # UPDATED
-                run.font.size = Pt(16)  # UPDATED
+                run = details_para.add_run(d + "\n")
+
+                run.font.name = "Arial"
+                run.font.size = Pt(16)
 
                 r = run._element
-                r.rPr.rFonts.set(qn('w:eastAsia'), 'Arial')  # UPDATED
-
-            # STEP 5: Set line spacing 2.0
-            details.paragraph_format.line_spacing = 2  # UPDATED
+                r.rPr.rFonts.set(qn('w:eastAsia'), 'Arial')
 
             output_path = os.path.join(temp_dir, file.filename)
             doc.save(output_path)
@@ -99,18 +93,16 @@ async def download_doc(
 
             prs = Presentation(input_path)
 
-            # UPDATED → Use Title and Content layout
-            layout = prs.slide_layouts[1]  # Title and Content
-
+            layout = prs.slide_layouts[1]
             detail_slide = prs.slides.add_slide(layout)
 
-            # Move slide to second position
             slide_ids = prs.slides._sldIdLst
             slides = list(slide_ids)
+
             slide_ids.remove(slides[-1])
             slide_ids.insert(1, slides[-1])
 
-            # ================= TITLE =================
+            # TITLE
             if detail_slide.shapes.title:
 
                 title = detail_slide.shapes.title
@@ -118,10 +110,10 @@ async def download_doc(
 
                 for paragraph in title.text_frame.paragraphs:
                     for run in paragraph.runs:
-                        run.font.name = "Arial"  # UPDATED
-                        run.font.size = PPTPt(40)  # UPDATED
+                        run.font.name = "Arial"
+                        run.font.size = PPTPt(40)
 
-            # ================= CONTENT =================
+            # CONTENT
             body_shape = detail_slide.placeholders[1]
             tf = body_shape.text_frame
             tf.clear()
@@ -144,11 +136,11 @@ async def download_doc(
                     p = tf.add_paragraph()
 
                 p.text = d
-                p.level = 0  # bullet
+                p.level = 0
 
                 for run in p.runs:
-                    run.font.name = "Arial"  # UPDATED
-                    run.font.size = PPTPt(24)  # UPDATED
+                    run.font.name = "Arial"
+                    run.font.size = PPTPt(24)
 
             output_path = os.path.join(temp_dir, file.filename)
             prs.save(output_path)
