@@ -3,3 +3,5 @@ uvicorn
 python-docx
 python-pptx
 python-multipart
+reportlab
+PyPDF2
