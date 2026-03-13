@@ -2,8 +2,9 @@ from fastapi import APIRouter, UploadFile, File, Form
 from fastapi.responses import FileResponse
 import subprocess
 import os
+
 from reportlab.pdfgen import canvas
-from PyPDF2 import PdfMerger
+from PyPDF2 import PdfMerger, PdfReader
 
 router = APIRouter()
 
@@ -24,7 +25,7 @@ async def convert_to_pdf(
     with open(input_path, "wb") as f:
         f.write(await file.read())
 
-    # Convert using LibreOffice
+    # Convert file → PDF
     subprocess.run([
         "libreoffice",
         "--headless",
@@ -33,11 +34,11 @@ async def convert_to_pdf(
         input_path,
         "--outdir",
         "/tmp"
-    ])
+    ], check=True)
 
     pdf_file = os.path.splitext(input_path)[0] + ".pdf"
 
-    # Create details page
+    # Create Document Details Page
     details_pdf = "/tmp/details_page.pdf"
 
     c = canvas.Canvas(details_pdf)
@@ -65,12 +66,21 @@ async def convert_to_pdf(
 
     c.save()
 
-    # Merge PDFs
+    # Read original PDF
+    reader = PdfReader(pdf_file)
+    total_pages = len(reader.pages)
+
     merger = PdfMerger()
 
-    merger.append(pdf_file, pages=(0,1))  # cover page
-    merger.append(details_pdf)            # new page
-    merger.append(pdf_file, pages=(1,None))  # rest pages
+    # Always add first page
+    merger.append(pdf_file, pages=(0,1))
+
+    # Insert details page
+    merger.append(details_pdf)
+
+    # Add remaining pages if exist
+    if total_pages > 1:
+        merger.append(pdf_file, pages=(1,total_pages))
 
     final_pdf = "/tmp/final_output.pdf"
 
