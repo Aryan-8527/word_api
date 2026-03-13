@@ -1,12 +1,9 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from docx import Document
-from docx.shared import Pt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from pptx import Presentation
-from pptx.util import Pt as PPTPt
 import tempfile
 import os
 import shutil
@@ -43,7 +40,23 @@ async def download_doc(
 
             doc = Document(input_path)
 
-            body = doc._element.body
+            template_path = "DCS_TEMPLATE.docx"
+            template_doc = Document(template_path)
+
+            replacements = {
+                "{{DOCUMENT_CODE}}": document_code,
+                "{{CLIENT_NAME}}": client_name,
+                "{{DEPARTMENT}}": department,
+                "{{DOCUMENT_TYPE}}": document_type,
+                "{{PURPOSE}}": purpose,
+                "{{CREATED_ON}}": created_on,
+                "{{CREATED_BY}}": created_by
+            }
+
+            for paragraph in template_doc.paragraphs:
+                for key, value in replacements.items():
+                    if key in paragraph.text:
+                        paragraph.text = paragraph.text.replace(key, value)
 
             # PAGE BREAK
             page_break = OxmlElement("w:p")
@@ -53,41 +66,16 @@ async def download_doc(
             run.append(br)
             page_break.append(run)
 
-            # HEADING
-            heading_para = doc.add_paragraph()
-            heading_para.text = "DOCUMENT DETAILS"
+            body = doc._element.body
 
-            run = heading_para.runs[0]
-            run.bold = True
-            run.underline = True
-            run.font.name = "Arial"
-            run.font.size = Pt(22)
+            # insert page break after first page
+            body.insert(1, page_break)
 
-            heading_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            insert_index = 2
 
-            # DETAILS
-            details_para = doc.add_paragraph()
-            details_para.paragraph_format.line_spacing = 2
-
-            details_list = [
-                f"Document Code : {document_code}",
-                f"Client Name : {client_name}",
-                f"Department : {department}",
-                f"Document Type : {document_type}",
-                f"Purpose : {purpose}",
-                f"Created On : {created_on}",
-                f"Created By : {created_by}",
-            ]
-
-            for d in details_list:
-                r = details_para.add_run(d + "\n")
-                r.font.name = "Arial"
-                r.font.size = Pt(16)
-
-            # INSERT AT TOP
-            body.insert(0, page_break)
-            body.insert(0, details_para._p)
-            body.insert(0, heading_para._p)
+            for element in template_doc.element.body:
+                body.insert(insert_index, element)
+                insert_index += 1
 
             output_path = os.path.join(temp_dir, file.filename)
             doc.save(output_path)
@@ -99,104 +87,65 @@ async def download_doc(
 
             prs = Presentation(input_path)
 
-            # --------------------------------
-            # FIND SAFE LAYOUT (TITLE + BODY)
-            # --------------------------------
-            chosen_layout = None
+            template_path = "DCS_TEMPLATE.pptx"
+            template_prs = Presentation(template_path)
 
-            for layout in prs.slide_layouts:
+            template_slide = template_prs.slides[0]
 
-                title_found = False
-                body_found = False
+            new_slide = prs.slides.add_slide(prs.slide_layouts[6])
 
-                for placeholder in layout.placeholders:
+            for shape in template_slide.shapes:
 
-                    ph_type = placeholder.placeholder_format.type
+                if shape.has_text_frame:
 
-                    if ph_type == 1:
-                        title_found = True
+                    new_shape = new_slide.shapes.add_textbox(
+                        shape.left,
+                        shape.top,
+                        shape.width,
+                        shape.height
+                    )
 
-                    if ph_type == 2:
-                        body_found = True
+                    tf = new_shape.text_frame
+                    tf.clear()
 
-                if title_found and body_found:
-                    chosen_layout = layout
-                    break
+                    for paragraph in shape.text_frame.paragraphs:
 
-            # fallback
-            if not chosen_layout:
-                chosen_layout = prs.slide_layouts[0]
+                        text = paragraph.text
 
-            detail_slide = prs.slides.add_slide(chosen_layout)
+                        text = text.replace("{{DOCUMENT_CODE}}", document_code)
+                        text = text.replace("{{CLIENT_NAME}}", client_name)
+                        text = text.replace("{{DEPARTMENT}}", department)
+                        text = text.replace("{{DOCUMENT_TYPE}}", document_type)
+                        text = text.replace("{{PURPOSE}}", purpose)
+                        text = text.replace("{{CREATED_ON}}", created_on)
+                        text = text.replace("{{CREATED_BY}}", created_by)
 
-            # --------------------------------
+                        p = tf.add_paragraph()
+                        p.text = text
+                        p.level = paragraph.level
+
+                elif shape.shape_type == 13:  # picture
+                    image_stream = shape.image.blob
+
+                    image_path = os.path.join(temp_dir, "temp_img.png")
+
+                    with open(image_path, "wb") as img:
+                        img.write(image_stream)
+
+                    new_slide.shapes.add_picture(
+                        image_path,
+                        shape.left,
+                        shape.top,
+                        shape.width,
+                        shape.height
+                    )
+
             # MOVE SLIDE TO POSITION 2
-            # --------------------------------
             slide_ids = prs.slides._sldIdLst
             slides = list(slide_ids)
 
             slide_ids.remove(slides[-1])
             slide_ids.insert(1, slides[-1])
-
-            # --------------------------------
-            # FIND TITLE
-            # --------------------------------
-            title_shape = None
-
-            for shape in detail_slide.shapes:
-
-                if shape.has_text_frame and shape == detail_slide.shapes.title:
-                    title_shape = shape
-                    break
-
-            if title_shape:
-
-                title_shape.text = "DOCUMENT DETAILS"
-
-                for paragraph in title_shape.text_frame.paragraphs:
-                    for run in paragraph.runs:
-                        run.font.name = "Arial"
-                        run.font.size = PPTPt(40)
-
-            # --------------------------------
-            # FIND BODY PLACEHOLDER
-            # --------------------------------
-            body_shape = None
-
-            for shape in detail_slide.shapes:
-
-                if shape.has_text_frame and shape != title_shape:
-                    body_shape = shape
-                    break
-
-            if body_shape:
-
-                tf = body_shape.text_frame
-                tf.clear()
-
-                details = [
-                    f"Document Code : {document_code}",
-                    f"Client Name : {client_name}",
-                    f"Department : {department}",
-                    f"Document Type : {document_type}",
-                    f"Purpose : {purpose}",
-                    f"Created On : {created_on}",
-                    f"Created By : {created_by}",
-                ]
-
-                for i, d in enumerate(details):
-
-                    if i == 0:
-                        p = tf.paragraphs[0]
-                    else:
-                        p = tf.add_paragraph()
-
-                    p.text = d
-                    p.level = 0
-
-                    for run in p.runs:
-                        run.font.name = "Arial"
-                        run.font.size = PPTPt(24)
 
             output_path = os.path.join(temp_dir, file.filename)
             prs.save(output_path)
