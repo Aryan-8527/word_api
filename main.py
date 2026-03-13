@@ -12,78 +12,94 @@ DOCX_TEMPLATE = "DCS_TEMPLATE.docx"
 PPT_TEMPLATE = "DCS_TEMPLATE.pptx"
 
 
-# -----------------------------
-# REPLACE PLACEHOLDERS DOCX
-# -----------------------------
 def replace_docx_placeholders(doc, data):
-
     for p in doc.paragraphs:
-        for key, value in data.items():
-            if key in p.text:
-                p.text = p.text.replace(key, value)
-
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for key, value in data.items():
-                    if key in cell.text:
-                        cell.text = cell.text.replace(key, value)
+        for k, v in data.items():
+            if k in p.text:
+                p.text = p.text.replace(k, v)
 
 
-# -----------------------------
-# APPEND DOCX DOCUMENT
-# -----------------------------
-def append_docx(template_doc, uploaded_doc):
-
-    for element in uploaded_doc.element.body:
-        template_doc.element.body.append(element)
-
-
-# -----------------------------
-# REPLACE PPT PLACEHOLDERS
-# -----------------------------
 def replace_ppt_placeholders(prs, data):
-
     slide = prs.slides[0]
 
     for shape in slide.shapes:
-
         if not shape.has_text_frame:
             continue
 
         for paragraph in shape.text_frame.paragraphs:
+            for k, v in data.items():
+                if k in paragraph.text:
+                    paragraph.text = paragraph.text.replace(k, v)
 
-            for key, value in data.items():
-                if key in paragraph.text:
-                    paragraph.text = paragraph.text.replace(key, value)
+
+def insert_docx_page(template_path, user_path, data):
+
+    template = Document(template_path)
+    user = Document(user_path)
+
+    replace_docx_placeholders(template, data)
+
+    new_doc = Document()
+
+    # Copy first page of user document
+    for element in user.element.body:
+        new_doc.element.body.append(element)
+        if element.tag.endswith("sectPr"):
+            break
+
+    # Insert template page
+    for element in template.element.body:
+        new_doc.element.body.append(element)
+
+    # Append rest of user document
+    body_started = False
+    for element in user.element.body:
+        if body_started:
+            new_doc.element.body.append(element)
+
+        if element.tag.endswith("sectPr"):
+            body_started = True
+
+    return new_doc
 
 
-# -----------------------------
-# COPY SLIDES FROM USER PPT
-# -----------------------------
-def copy_user_slides(template_prs, user_prs):
+def insert_ppt_slide(template_path, user_path, data):
 
-    for slide in user_prs.slides:
+    template = Presentation(template_path)
+    user = Presentation(user_path)
 
-        layout = template_prs.slide_layouts[6]  # blank layout
-        new_slide = template_prs.slides.add_slide(layout)
+    replace_ppt_placeholders(template, data)
+
+    new_ppt = Presentation()
+
+    # copy first slide
+    slide = user.slides[0]
+    layout = new_ppt.slide_layouts[6]
+    new_slide = new_ppt.slides.add_slide(layout)
+
+    for shape in slide.shapes:
+        el = shape.element
+        new_slide.shapes._spTree.insert_element_before(el, 'p:extLst')
+
+    # insert template slide
+    temp_slide = template.slides[0]
+    layout = new_ppt.slide_layouts[6]
+    new_slide = new_ppt.slides.add_slide(layout)
+
+    for shape in temp_slide.shapes:
+        el = shape.element
+        new_slide.shapes._spTree.insert_element_before(el, 'p:extLst')
+
+    # append remaining slides
+    for slide in user.slides[1:]:
+        layout = new_ppt.slide_layouts[6]
+        new_slide = new_ppt.slides.add_slide(layout)
 
         for shape in slide.shapes:
+            el = shape.element
+            new_slide.shapes._spTree.insert_element_before(el, 'p:extLst')
 
-            if shape.has_text_frame:
-                textbox = new_slide.shapes.add_textbox(
-                    shape.left,
-                    shape.top,
-                    shape.width,
-                    shape.height
-                )
-
-                tf = textbox.text_frame
-
-                for paragraph in shape.text_frame.paragraphs:
-                    p = tf.add_paragraph()
-                    p.text = paragraph.text
-                    p.level = paragraph.level
+    return new_ppt
 
 
 @app.post("/download-doc")
@@ -101,7 +117,6 @@ async def download_doc(
     try:
 
         temp_dir = tempfile.mkdtemp()
-
         input_path = os.path.join(temp_dir, file.filename)
 
         with open(input_path, "wb") as f:
@@ -119,39 +134,17 @@ async def download_doc(
             "{{CREATED_BY}}": created_by
         }
 
-        # =========================
-        # WORD DOCUMENT
-        # =========================
+        output_path = os.path.join(temp_dir, file.filename)
+
         if ext == ".docx":
 
-            template_doc = Document(DOCX_TEMPLATE)
-            user_doc = Document(input_path)
+            merged = insert_docx_page(DOCX_TEMPLATE, input_path, data)
+            merged.save(output_path)
 
-            replace_docx_placeholders(template_doc, data)
-
-            template_doc.add_page_break()
-
-            append_docx(template_doc, user_doc)
-
-            output_path = os.path.join(temp_dir, file.filename)
-
-            template_doc.save(output_path)
-
-        # =========================
-        # POWERPOINT
-        # =========================
         elif ext == ".pptx":
 
-            template_prs = Presentation(PPT_TEMPLATE)
-            user_prs = Presentation(input_path)
-
-            replace_ppt_placeholders(template_prs, data)
-
-            copy_user_slides(template_prs, user_prs)
-
-            output_path = os.path.join(temp_dir, file.filename)
-
-            template_prs.save(output_path)
+            merged = insert_ppt_slide(PPT_TEMPLATE, input_path, data)
+            merged.save(output_path)
 
         else:
             raise HTTPException(
@@ -162,9 +155,7 @@ async def download_doc(
         return FileResponse(
             output_path,
             media_type="application/octet-stream",
-            headers={
-                "Content-Disposition": f'attachment; filename="{file.filename}"'
-            }
+            headers={"Content-Disposition": f'attachment; filename="{file.filename}"'}
         )
 
     except Exception as e:
