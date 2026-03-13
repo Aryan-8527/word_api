@@ -8,7 +8,13 @@ import tempfile
 import os
 import shutil
 
+# IMPORT PDF ROUTER
+from convert_api import router as convert_router
+
 app = FastAPI()
+
+# REGISTER SECOND API
+app.include_router(convert_router)
 
 
 @app.post("/download-doc")
@@ -34,14 +40,13 @@ async def download_doc(
         ext = os.path.splitext(file.filename)[1].lower()
 
         # ===============================
-        # WORD DOCUMENT PROCESSING
+        # WORD DOCUMENT
         # ===============================
         if ext == ".docx":
 
             doc = Document(input_path)
 
-            template_path = "DCS_TEMPLATE.docx"
-            template_doc = Document(template_path)
+            template_doc = Document("DCS_TEMPLATE.docx")
 
             replacements = {
                 "{{DOCUMENT_CODE}}": document_code,
@@ -58,7 +63,6 @@ async def download_doc(
                     if key in paragraph.text:
                         paragraph.text = paragraph.text.replace(key, value)
 
-            # PAGE BREAK
             page_break = OxmlElement("w:p")
             run = OxmlElement("w:r")
             br = OxmlElement("w:br")
@@ -67,8 +71,6 @@ async def download_doc(
             page_break.append(run)
 
             body = doc._element.body
-
-            # insert page break after first page
             body.insert(1, page_break)
 
             insert_index = 2
@@ -81,17 +83,14 @@ async def download_doc(
             doc.save(output_path)
 
         # ===============================
-        # POWERPOINT PROCESSING
+        # POWERPOINT
         # ===============================
         elif ext == ".pptx":
 
             prs = Presentation(input_path)
-
-            template_path = "DCS_TEMPLATE.pptx"
-            template_prs = Presentation(template_path)
+            template_prs = Presentation("DCS_TEMPLATE.pptx")
 
             template_slide = template_prs.slides[0]
-
             new_slide = prs.slides.add_slide(prs.slide_layouts[6])
 
             for shape in template_slide.shapes:
@@ -124,9 +123,9 @@ async def download_doc(
                         p.text = text
                         p.level = paragraph.level
 
-                elif shape.shape_type == 13:  # picture
-                    image_stream = shape.image.blob
+                elif shape.shape_type == 13:
 
+                    image_stream = shape.image.blob
                     image_path = os.path.join(temp_dir, "temp_img.png")
 
                     with open(image_path, "wb") as img:
@@ -140,7 +139,6 @@ async def download_doc(
                         shape.height
                     )
 
-            # MOVE SLIDE TO POSITION 2
             slide_ids = prs.slides._sldIdLst
             slides = list(slide_ids)
 
@@ -153,7 +151,7 @@ async def download_doc(
         else:
             raise HTTPException(
                 status_code=400,
-                detail="Only DOCX and PPTX files are supported"
+                detail="Only DOCX and PPTX supported"
             )
 
         return FileResponse(
