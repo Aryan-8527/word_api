@@ -4,6 +4,7 @@ from docx import Document
 from pptx import Presentation
 import tempfile
 import shutil
+import zipfile
 import os
 
 app = FastAPI()
@@ -12,94 +13,109 @@ DOCX_TEMPLATE = "DCS_TEMPLATE.docx"
 PPT_TEMPLATE = "DCS_TEMPLATE.pptx"
 
 
-def replace_docx_placeholders(doc, data):
+# -----------------------------
+# Replace placeholders in DOCX template
+# -----------------------------
+def prepare_docx_template(data):
+
+    doc = Document(DOCX_TEMPLATE)
+
     for p in doc.paragraphs:
         for k, v in data.items():
             if k in p.text:
                 p.text = p.text.replace(k, v)
 
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
+    doc.save(tmp.name)
 
-def replace_ppt_placeholders(prs, data):
+    return tmp.name
+
+
+# -----------------------------
+# Replace placeholders in PPT template
+# -----------------------------
+def prepare_ppt_template(data):
+
+    prs = Presentation(PPT_TEMPLATE)
+
     slide = prs.slides[0]
 
     for shape in slide.shapes:
         if not shape.has_text_frame:
             continue
 
-        for paragraph in shape.text_frame.paragraphs:
+        for p in shape.text_frame.paragraphs:
             for k, v in data.items():
-                if k in paragraph.text:
-                    paragraph.text = paragraph.text.replace(k, v)
+                if k in p.text:
+                    p.text = p.text.replace(k, v)
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pptx")
+    prs.save(tmp.name)
+
+    return tmp.name
 
 
-def insert_docx_page(template_path, user_path, data):
+# -----------------------------
+# Insert DOCX page after first page
+# -----------------------------
+def merge_docx(user_docx, template_docx, output):
 
-    template = Document(template_path)
-    user = Document(user_path)
+    main = Document(user_docx)
+    template = Document(template_docx)
 
-    replace_docx_placeholders(template, data)
+    new = Document()
 
-    new_doc = Document()
-
-    # Copy first page of user document
-    for element in user.element.body:
-        new_doc.element.body.append(element)
+    # Copy first page (cover)
+    for element in main.element.body[:]:
+        new.element.body.append(element)
         if element.tag.endswith("sectPr"):
             break
 
     # Insert template page
     for element in template.element.body:
-        new_doc.element.body.append(element)
+        new.element.body.append(element)
 
-    # Append rest of user document
+    # Append rest of document
     body_started = False
-    for element in user.element.body:
+
+    for element in main.element.body:
         if body_started:
-            new_doc.element.body.append(element)
+            new.element.body.append(element)
 
         if element.tag.endswith("sectPr"):
             body_started = True
 
-    return new_doc
+    new.save(output)
 
 
-def insert_ppt_slide(template_path, user_path, data):
+# -----------------------------
+# Insert PPT slide at position 2
+# -----------------------------
+def merge_ppt(user_ppt, template_ppt, output):
 
-    template = Presentation(template_path)
-    user = Presentation(user_path)
+    prs_user = Presentation(user_ppt)
+    prs_template = Presentation(template_ppt)
 
-    replace_ppt_placeholders(template, data)
+    new = Presentation(user_ppt)
 
-    new_ppt = Presentation()
+    # insert template slide after slide 1
+    template_slide = prs_template.slides[0]
 
-    # copy first slide
-    slide = user.slides[0]
-    layout = new_ppt.slide_layouts[6]
-    new_slide = new_ppt.slides.add_slide(layout)
+    slide_layout = new.slide_layouts[6]
+    inserted_slide = new.slides.add_slide(slide_layout)
 
-    for shape in slide.shapes:
+    for shape in template_slide.shapes:
         el = shape.element
-        new_slide.shapes._spTree.insert_element_before(el, 'p:extLst')
+        inserted_slide.shapes._spTree.insert_element_before(el, 'p:extLst')
 
-    # insert template slide
-    temp_slide = template.slides[0]
-    layout = new_ppt.slide_layouts[6]
-    new_slide = new_ppt.slides.add_slide(layout)
+    # move inserted slide to index 1
+    slide_ids = new.slides._sldIdLst
+    slides = list(slide_ids)
 
-    for shape in temp_slide.shapes:
-        el = shape.element
-        new_slide.shapes._spTree.insert_element_before(el, 'p:extLst')
+    slide_ids.remove(slides[-1])
+    slide_ids.insert(1, slides[-1])
 
-    # append remaining slides
-    for slide in user.slides[1:]:
-        layout = new_ppt.slide_layouts[6]
-        new_slide = new_ppt.slides.add_slide(layout)
-
-        for shape in slide.shapes:
-            el = shape.element
-            new_slide.shapes._spTree.insert_element_before(el, 'p:extLst')
-
-    return new_ppt
+    new.save(output)
 
 
 @app.post("/download-doc")
@@ -117,6 +133,7 @@ async def download_doc(
     try:
 
         temp_dir = tempfile.mkdtemp()
+
         input_path = os.path.join(temp_dir, file.filename)
 
         with open(input_path, "wb") as f:
@@ -138,19 +155,16 @@ async def download_doc(
 
         if ext == ".docx":
 
-            merged = insert_docx_page(DOCX_TEMPLATE, input_path, data)
-            merged.save(output_path)
+            template_ready = prepare_docx_template(data)
+            merge_docx(input_path, template_ready, output_path)
 
         elif ext == ".pptx":
 
-            merged = insert_ppt_slide(PPT_TEMPLATE, input_path, data)
-            merged.save(output_path)
+            template_ready = prepare_ppt_template(data)
+            merge_ppt(input_path, template_ready, output_path)
 
         else:
-            raise HTTPException(
-                status_code=400,
-                detail="Only DOCX and PPTX supported"
-            )
+            raise HTTPException(status_code=400, detail="Only DOCX and PPTX supported")
 
         return FileResponse(
             output_path,
