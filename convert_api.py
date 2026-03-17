@@ -5,11 +5,14 @@ import os
 
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4, landscape
-from reportlab.lib.units import mm
 from reportlab.lib.colors import HexColor
+from reportlab.platypus import Table, TableStyle
+from reportlab.lib import colors
+
 from PyPDF2 import PdfMerger, PdfReader
 
 router = APIRouter()
+
 
 @router.post("/convert-to-pdf")
 async def convert_to_pdf(
@@ -28,7 +31,7 @@ async def convert_to_pdf(
     with open(input_path, "wb") as f:
         f.write(await file.read())
 
-    # Convert to PDF
+    # Convert to PDF using LibreOffice
     subprocess.run([
         "libreoffice",
         "--headless",
@@ -42,6 +45,7 @@ async def convert_to_pdf(
     pdf_file = "/tmp/" + os.path.splitext(file.filename)[0] + ".pdf"
 
     reader = PdfReader(pdf_file)
+
     first_page = reader.pages[0]
 
     width = float(first_page.mediabox.width)
@@ -50,7 +54,7 @@ async def convert_to_pdf(
     # Detect orientation
     is_landscape = width > height
 
-    # Create Document Details Page
+    # Document Details Page
     details_pdf = "/tmp/details_page.pdf"
 
     page_size = landscape(A4) if is_landscape else A4
@@ -60,36 +64,48 @@ async def convert_to_pdf(
     width, height = page_size
 
     # Title
-    c.setFont("Helvetica-Bold", 22)
+    c.setFont("Helvetica-Bold", 24)
     c.setFillColor(HexColor("#003366"))
-    c.drawString(50, height-80, "Document Details")
+    c.drawString(70, height - 80, "Document Control Information")
 
     # Divider
     c.setLineWidth(2)
-    c.line(50, height-90, width-50, height-90)
+    c.line(70, height - 90, width - 70, height - 90)
 
-    c.setFont("Helvetica", 13)
-    y = height - 150
-
-    fields = [
-        ("Document Code", document_code),
-        ("Client Name", client_name),
-        ("Department", department),
-        ("Document Type", document_type),
-        ("Purpose", purpose),
-        ("Created On", created_on),
-        ("Created By", created_by),
+    # Table Data
+    data = [
+        ["Field", "Value"],
+        ["Document Number", document_code],
+        ["Client Name", client_name],
+        ["Department", department],
+        ["Document Type", document_type],
+        ["Purpose", purpose],
+        ["Created On", created_on],
+        ["Created By", created_by],
     ]
 
-    for label, value in fields:
+    table = Table(data, colWidths=[220, 380])
 
-        c.setFillColor(HexColor("#444444"))
-        c.drawString(70, y, f"{label}")
+    table.setStyle(TableStyle([
 
-        c.setFillColor(HexColor("#000000"))
-        c.drawString(250, y, f": {value}")
+        ("BACKGROUND", (0,0), (-1,0), colors.lightgrey),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.black),
 
-        y -= 40
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("FONTSIZE", (0,0), (-1,-1), 12),
+
+        ("ALIGN", (0,0), (-1,-1), "LEFT"),
+
+        ("GRID", (0,0), (-1,-1), 1, colors.black),
+
+        ("ROWBACKGROUNDS", (0,1), (-1,-1),
+            [colors.whitesmoke, colors.lightgrey]
+        )
+
+    ]))
+
+    table.wrapOn(c, width, height)
+    table.drawOn(c, 70, height - 350)
 
     c.save()
 
@@ -98,11 +114,15 @@ async def convert_to_pdf(
 
     total_pages = len(reader.pages)
 
-    merger.append(pdf_file, pages=(0,1))
+    # First page
+    merger.append(pdf_file, pages=(0, 1))
+
+    # Details page
     merger.append(details_pdf)
 
+    # Remaining pages
     if total_pages > 1:
-        merger.append(pdf_file, pages=(1,total_pages))
+        merger.append(pdf_file, pages=(1, total_pages))
 
     final_pdf = "/tmp/final_output.pdf"
 
