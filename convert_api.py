@@ -88,21 +88,23 @@ async def convert_to_pdf(
 
     table.setStyle(TableStyle([
 
-        ("BACKGROUND", (0,0), (-1,0), colors.lightgrey),
-        ("TEXTCOLOR", (0,0), (-1,0), colors.black),
+    ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+    ("FONTNAME", (0,1), (-1,-1), "Helvetica"),
 
-        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
-        ("FONTSIZE", (0,0), (-1,-1), 12),
+    ("FONTSIZE", (0,0), (-1,-1), 14),
 
-        ("ALIGN", (0,0), (-1,-1), "LEFT"),
+    ("ALIGN", (0,0), (-1,-1), "LEFT"),
 
-        ("GRID", (0,0), (-1,-1), 1, colors.black),
+    ("GRID", (0,0), (-1,-1), 1.2, colors.black),
 
-        ("ROWBACKGROUNDS", (0,1), (-1,-1),
-            [colors.whitesmoke, colors.lightgrey]
-        )
+    ("BACKGROUND", (0,0), (-1,-1), colors.white),
 
-    ]))
+    ("LEFTPADDING", (0,0), (-1,-1), 12),
+    ("RIGHTPADDING", (0,0), (-1,-1), 12),
+    ("TOPPADDING", (0,0), (-1,-1), 10),
+    ("BOTTOMPADDING", (0,0), (-1,-1), 10),
+
+   ]))
 
     table.wrapOn(c, width, height)
     table.drawOn(c, 70, height - 350)
