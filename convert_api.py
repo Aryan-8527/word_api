@@ -15,9 +15,29 @@ from PyPDF2 import PdfMerger, PdfReader
 
 router = APIRouter()
 
-# Register Calibri Fonts
-pdfmetrics.registerFont(TTFont('Calibri', 'Calibri.ttf'))
-pdfmetrics.registerFont(TTFont('Calibri-Bold', 'Calibri-Bold.ttf'))
+# =========================
+# FONT SETUP (SAFE METHOD)
+# =========================
+try:
+    base_path = os.getcwd()
+
+    font_path = os.path.join(base_path, "calibri.ttf")
+    bold_font_path = os.path.join(base_path, "calibri-bold.ttf")
+
+    pdfmetrics.registerFont(TTFont('Calibri', font_path))
+    pdfmetrics.registerFont(TTFont('Calibri-Bold', bold_font_path))
+
+    FONT = "Calibri"
+    FONT_BOLD = "Calibri-Bold"
+
+    print("✅ Calibri font loaded")
+
+except Exception as e:
+    print("❌ Font load failed:", e)
+
+    # fallback (no crash)
+    FONT = "Helvetica"
+    FONT_BOLD = "Helvetica-Bold"
 
 
 @router.post("/convert-to-pdf")
@@ -32,12 +52,17 @@ async def convert_to_pdf(
     created_by: str = Form(...)
 ):
 
-    # Save uploaded file
+    # =========================
+    # SAVE FILE
+    # =========================
     input_path = f"/tmp/{file.filename}"
+
     with open(input_path, "wb") as f:
         f.write(await file.read())
 
-    # Convert to PDF using LibreOffice
+    # =========================
+    # CONVERT TO PDF
+    # =========================
     subprocess.run([
         "libreoffice",
         "--headless",
@@ -53,22 +78,24 @@ async def convert_to_pdf(
     reader = PdfReader(pdf_file)
 
     # =========================
-    # CREATE DETAILS PAGE (A4 FIXED)
+    # CREATE DETAILS PAGE
     # =========================
     details_pdf = "/tmp/details_page.pdf"
 
     c = canvas.Canvas(details_pdf, pagesize=A4)
     width, height = A4
 
-    # Title (Centered)
-    c.setFont("Calibri-Bold", 12)
+    # Title
+    c.setFont(FONT_BOLD, 12)
     c.drawCentredString(width / 2, height - 80, "Document Control Information")
 
-    # Line below title
+    # Line
     c.setLineWidth(1)
     c.line(100, height - 90, width - 100, height - 90)
 
-    # Table Data
+    # =========================
+    # TABLE DATA
+    # =========================
     data = [
         ["Document Number", document_code],
         ["Client Name", client_name],
@@ -83,11 +110,9 @@ async def convert_to_pdf(
 
     table.setStyle(TableStyle([
 
-        ("FONTNAME", (0,0), (-1,0), "Calibri-Bold"),
-        ("FONTNAME", (0,1), (-1,-1), "Calibri"),
+        ("FONTNAME", (0,0), (-1,-1), FONT),
 
-        ("FONTSIZE", (0,0), (-1,0), 12),
-        ("FONTSIZE", (0,1), (-1,-1), 11),
+        ("FONTSIZE", (0,0), (-1,-1), 11),
 
         ("ALIGN", (0,0), (-1,-1), "LEFT"),
 
@@ -95,7 +120,7 @@ async def convert_to_pdf(
 
         ("BACKGROUND", (0,0), (-1,-1), colors.white),
 
-        # Padding (important)
+        # Padding
         ("LEFTPADDING", (0,0), (-1,-1), 10),
         ("RIGHTPADDING", (0,0), (-1,-1), 10),
         ("TOPPADDING", (0,0), (-1,-1), 8),
@@ -103,8 +128,11 @@ async def convert_to_pdf(
 
     ]))
 
-    # Center Table
+    # =========================
+    # CENTER TABLE
+    # =========================
     table_width, table_height = table.wrap(0, 0)
+
     x = (width - table_width) / 2
     y = height - 250
 
@@ -122,7 +150,7 @@ async def convert_to_pdf(
     # First page
     merger.append(pdf_file, pages=(0, 1))
 
-    # Insert Details Page
+    # Details page
     merger.append(details_pdf)
 
     # Remaining pages
@@ -134,6 +162,9 @@ async def convert_to_pdf(
     merger.write(final_pdf)
     merger.close()
 
+    # =========================
+    # RETURN FILE
+    # =========================
     return FileResponse(
         final_pdf,
         media_type="application/pdf",
