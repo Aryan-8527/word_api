@@ -4,7 +4,7 @@ import subprocess
 import os
 
 from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.platypus import Table, TableStyle
 from reportlab.lib import colors
 
@@ -16,7 +16,7 @@ from PyPDF2 import PdfMerger, PdfReader
 router = APIRouter()
 
 # =========================
-# FONT SETUP (SAFE METHOD)
+# FONT SETUP (SAFE)
 # =========================
 try:
     base_path = os.getcwd()
@@ -35,7 +35,6 @@ try:
 except Exception as e:
     print("❌ Font load failed:", e)
 
-    # fallback (no crash)
     FONT = "Helvetica"
     FONT_BOLD = "Helvetica-Bold"
 
@@ -56,7 +55,6 @@ async def convert_to_pdf(
     # SAVE FILE
     # =========================
     input_path = f"/tmp/{file.filename}"
-
     with open(input_path, "wb") as f:
         f.write(await file.read())
 
@@ -78,20 +76,34 @@ async def convert_to_pdf(
     reader = PdfReader(pdf_file)
 
     # =========================
+    # DETECT ORIENTATION
+    # =========================
+    first_page = reader.pages[0]
+
+    width_pdf = float(first_page.mediabox.width)
+    height_pdf = float(first_page.mediabox.height)
+
+    is_landscape = width_pdf > height_pdf
+
+    # =========================
     # CREATE DETAILS PAGE
     # =========================
     details_pdf = "/tmp/details_page.pdf"
 
-    c = canvas.Canvas(details_pdf, pagesize=A4)
-    width, height = A4
+    page_size = landscape(A4) if is_landscape else A4
 
-    # Title
+    c = canvas.Canvas(details_pdf, pagesize=page_size)
+    width, height = page_size
+
+    # =========================
+    # TITLE
+    # =========================
     c.setFont(FONT_BOLD, 12)
-    c.drawCentredString(width / 2, height - 80, "Document Control Information")
+    c.drawCentredString(width / 2, height - 60, "Document Control Information")
 
-    # Line
+    # Line below title
     c.setLineWidth(1)
-    c.line(100, height - 90, width - 100, height - 90)
+    c.line(80, height - 70, width - 80, height - 70)
 
     # =========================
     # TABLE DATA
@@ -134,7 +146,7 @@ async def convert_to_pdf(
     table_width, table_height = table.wrap(0, 0)
 
     x = (width - table_width) / 2
-    y = height - 250
+    y = height - 150
 
     table.drawOn(c, x, y)
 
@@ -150,7 +162,7 @@ async def convert_to_pdf(
     # First page
     merger.append(pdf_file, pages=(0, 1))
 
-    # Details page
+    # Insert Details Page
     merger.append(details_pdf)
 
     # Remaining pages
