@@ -5,38 +5,13 @@ import os
 
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.colors import HexColor
 from reportlab.platypus import Table, TableStyle
 from reportlab.lib import colors
-
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
 
 from PyPDF2 import PdfMerger, PdfReader
 
 router = APIRouter()
-
-# =========================
-# FONT SETUP (SAFE)
-# =========================
-try:
-    base_path = os.getcwd()
-
-    font_path = os.path.join(base_path, "calibri.ttf")
-    bold_font_path = os.path.join(base_path, "calibri-bold.ttf")
-
-    pdfmetrics.registerFont(TTFont('Calibri', font_path))
-    pdfmetrics.registerFont(TTFont('Calibri-Bold', bold_font_path))
-
-    FONT = "Calibri"
-    FONT_BOLD = "Calibri-Bold"
-
-    print("✅ Calibri font loaded")
-
-except Exception as e:
-    print("❌ Font load failed:", e)
-
-    FONT = "Helvetica"
-    FONT_BOLD = "Helvetica-Bold"
 
 
 @router.post("/convert-to-pdf")
@@ -51,16 +26,12 @@ async def convert_to_pdf(
     created_by: str = Form(...)
 ):
 
-    # =========================
-    # SAVE FILE
-    # =========================
     input_path = f"/tmp/{file.filename}"
+
     with open(input_path, "wb") as f:
         f.write(await file.read())
 
-    # =========================
-    # CONVERT TO PDF
-    # =========================
+    # Convert to PDF using LibreOffice
     subprocess.run([
         "libreoffice",
         "--headless",
@@ -75,39 +46,33 @@ async def convert_to_pdf(
 
     reader = PdfReader(pdf_file)
 
-    # =========================
-    # DETECT ORIENTATION
-    # =========================
     first_page = reader.pages[0]
 
-    width_pdf = float(first_page.mediabox.width)
-    height_pdf = float(first_page.mediabox.height)
+    width = float(first_page.mediabox.width)
+    height = float(first_page.mediabox.height)
 
-    is_landscape = width_pdf > height_pdf
+    # Detect orientation
+    is_landscape = width > height
 
-    # =========================
-    # CREATE DETAILS PAGE
-    # =========================
+    # Document Details Page
     details_pdf = "/tmp/details_page.pdf"
 
     page_size = landscape(A4) if is_landscape else A4
 
     c = canvas.Canvas(details_pdf, pagesize=page_size)
+
     width, height = page_size
 
-    # =========================
-    # TITLE
-    # =========================
-    c.setFont(FONT_BOLD, 12)
-    c.drawCentredString(width / 2, height - 60, "Document Control Information")
+    # Title
+    c.setFont("Helvetica-Bold", 24)
+    c.setFillColor(HexColor("#003366"))
+    c.drawString(70, height - 80, "Document Control Information")
 
-    # Line below title
-    c.setLineWidth(1)
-    c.line(80, height - 70, width - 80, height - 70)
+    # Divider
+    c.setLineWidth(2)
+    c.line(70, height - 90, width - 70, height - 90)
 
-    # =========================
-    # TABLE DATA
-    # =========================
+    # Table Data
     data = [
         ["Document Number", document_code],
         ["Client Name", client_name],
@@ -118,43 +83,34 @@ async def convert_to_pdf(
         ["Created By", created_by],
     ]
 
-    table = Table(data, colWidths=[200, 300])
+    table = Table(data, colWidths=[220, 380])
 
     table.setStyle(TableStyle([
 
-        ("FONTNAME", (0,0), (-1,-1), FONT),
+    ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+    ("FONTNAME", (0,1), (-1,-1), "Helvetica"),
 
-        ("FONTSIZE", (0,0), (-1,-1), 11),
+    ("FONTSIZE", (0,0), (-1,-1), 14),
 
-        ("ALIGN", (0,0), (-1,-1), "LEFT"),
+    ("ALIGN", (0,0), (-1,-1), "LEFT"),
 
-        ("GRID", (0,0), (-1,-1), 1, colors.black),
+    ("GRID", (0,0), (-1,-1), 1.2, colors.black),
 
-        ("BACKGROUND", (0,0), (-1,-1), colors.white),
+    ("BACKGROUND", (0,0), (-1,-1), colors.white),
 
-        # Padding
-        ("LEFTPADDING", (0,0), (-1,-1), 10),
-        ("RIGHTPADDING", (0,0), (-1,-1), 10),
-        ("TOPPADDING", (0,0), (-1,-1), 8),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 8),
+    ("LEFTPADDING", (0,0), (-1,-1), 12),
+    ("RIGHTPADDING", (0,0), (-1,-1), 12),
+    ("TOPPADDING", (0,0), (-1,-1), 10),
+    ("BOTTOMPADDING", (0,0), (-1,-1), 10),
 
-    ]))
+   ]))
 
-    # =========================
-    # CENTER TABLE
-    # =========================
-    table_width, table_height = table.wrap(0, 0)
-
-    x = (width - table_width) / 2
-    y = height - 150
-
-    table.drawOn(c, x, y)
+    table.wrapOn(c, width, height)
+    table.drawOn(c, 70, height - 350)
 
     c.save()
 
-    # =========================
-    # MERGE PDF
-    # =========================
+    # Merge PDFs
     merger = PdfMerger()
 
     total_pages = len(reader.pages)
@@ -162,7 +118,7 @@ async def convert_to_pdf(
     # First page
     merger.append(pdf_file, pages=(0, 1))
 
-    # Insert Details Page
+    # Details page
     merger.append(details_pdf)
 
     # Remaining pages
@@ -174,9 +130,6 @@ async def convert_to_pdf(
     merger.write(final_pdf)
     merger.close()
 
-    # =========================
-    # RETURN FILE
-    # =========================
     return FileResponse(
         final_pdf,
         media_type="application/pdf",
