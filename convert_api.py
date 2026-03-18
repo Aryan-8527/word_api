@@ -74,7 +74,6 @@ async def convert_to_pdf(
 
     # Table Data
     data = [
-        ["Field", "Value"],
         ["Document Number", document_code],
         ["Client Name", client_name],
         ["Department", department],
