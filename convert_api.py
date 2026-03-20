@@ -73,7 +73,7 @@ async def convert_to_pdf(
     # =========================
     c.setFont("Helvetica-Bold", 16)
     c.setFillColor(HexColor("#003366"))
-    c.drawCentredString(width / 2, height - 50, "Document Control Information")
+    c.drawCentredString(width / 2, height , "Document Control Information")
 
     # Divider
     c.setLineWidth(1.5)
