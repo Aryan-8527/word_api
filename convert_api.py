@@ -25,17 +25,12 @@ async def convert_to_pdf(
     created_by: str = Form(...)
 ):
 
-    # =========================
     # SAVE FILE
-    # =========================
     input_path = f"/tmp/{file.filename}"
-
     with open(input_path, "wb") as f:
         f.write(await file.read())
 
-    # =========================
     # CONVERT TO PDF
-    # =========================
     subprocess.run([
         "libreoffice",
         "--headless",
@@ -49,9 +44,7 @@ async def convert_to_pdf(
     pdf_file = "/tmp/" + os.path.splitext(file.filename)[0] + ".pdf"
     reader = PdfReader(pdf_file)
 
-    # =========================
-    # GET ORIGINAL PAGE SIZE
-    # =========================
+    # PAGE SIZE
     first_page = reader.pages[0]
     width = float(first_page.mediabox.width)
     height = float(first_page.mediabox.height)
@@ -63,22 +56,34 @@ async def convert_to_pdf(
     c = canvas.Canvas(details_pdf, pagesize=(width, height))
 
     # =========================
-    # WATERMARK (ONLY SECOND PAGE)
+    # WATERMARK FIX (NO STRETCH)
     # =========================
-    logo_path = "logo_watermark.jpeg"   # 👈 apna image name
+    logo_path = "logo_watermark.jpeg"
 
     if os.path.exists(logo_path):
         img = ImageReader(logo_path)
+        img_w, img_h = img.getSize()
 
-        img_width = width * 0.6
-        img_height = height * 0.3
+        # Maintain aspect ratio
+        ratio = img_w / img_h
 
-        x = (width - img_width) / 2
-        y = (height - img_height) / 2
+        max_width = width * 0.6
+        max_height = height * 0.4
+
+        if max_width / ratio <= max_height:
+            draw_width = max_width
+            draw_height = max_width / ratio
+        else:
+            draw_height = max_height
+            draw_width = max_height * ratio
+
+        # CENTER POSITION
+        x = (width - draw_width) / 2
+        y = (height - draw_height) / 2
 
         c.saveState()
-        c.setFillAlpha(0.08)   # transparency (adjust kar sakte ho)
-        c.drawImage(img, x, y, width=img_width, height=img_height, mask='auto')
+        c.setFillAlpha(0.08)   # transparency
+        c.drawImage(img, x, y, width=draw_width, height=draw_height, mask='auto')
         c.restoreState()
 
     # =========================
@@ -92,7 +97,7 @@ async def convert_to_pdf(
     c.line(80, height - 90, width - 80, height - 90)
 
     # =========================
-    # TABLE DATA
+    # TABLE
     # =========================
     data = [
         ["Document Number", document_code],
@@ -104,7 +109,6 @@ async def convert_to_pdf(
         ["Created By", created_by],
     ]
 
-    # TABLE WIDTH
     table_width = width - 160
 
     col_widths = [
@@ -115,7 +119,6 @@ async def convert_to_pdf(
     table = Table(data, colWidths=col_widths)
 
     table.setStyle(TableStyle([
-
         ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
         ("FONTNAME", (0,1), (-1,-1), "Helvetica"),
 
@@ -132,12 +135,11 @@ async def convert_to_pdf(
         ("RIGHTPADDING", (0,0), (-1,-1), 12),
         ("TOPPADDING", (0,0), (-1,-1), 10),
         ("BOTTOMPADDING", (0,0), (-1,-1), 10),
-
     ]))
 
-    # POSITION
+    # POSITION FIX (always visible)
     table.wrapOn(c, width, height)
-    table.drawOn(c, 80, height - 360)
+    table.drawOn(c, 80, height - 350)
 
     c.save()
 
@@ -148,13 +150,9 @@ async def convert_to_pdf(
 
     total_pages = len(reader.pages)
 
-    # First page
-    merger.append(pdf_file, pages=(0, 1))
+    merger.append(pdf_file, pages=(0, 1))   # first page
+    merger.append(details_pdf)              # second page
 
-    # Second page (with watermark)
-    merger.append(details_pdf)
-
-    # Remaining pages
     if total_pages > 1:
         merger.append(pdf_file, pages=(1, total_pages))
 
@@ -163,9 +161,6 @@ async def convert_to_pdf(
     merger.write(final_pdf)
     merger.close()
 
-    # =========================
-    # RETURN FILE
-    # =========================
     return FileResponse(
         final_pdf,
         media_type="application/pdf",
