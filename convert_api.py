@@ -25,12 +25,11 @@ async def convert_to_pdf(
     created_by: str = Form(...)
 ):
 
-    # SAVE FILE
     input_path = f"/tmp/{file.filename}"
+
     with open(input_path, "wb") as f:
         f.write(await file.read())
 
-    # CONVERT TO PDF
     subprocess.run([
         "libreoffice",
         "--headless",
@@ -44,7 +43,6 @@ async def convert_to_pdf(
     pdf_file = "/tmp/" + os.path.splitext(file.filename)[0] + ".pdf"
     reader = PdfReader(pdf_file)
 
-    # PAGE SIZE
     first_page = reader.pages[0]
     width = float(first_page.mediabox.width)
     height = float(first_page.mediabox.height)
@@ -56,33 +54,26 @@ async def convert_to_pdf(
     c = canvas.Canvas(details_pdf, pagesize=(width, height))
 
     # =========================
-    # WATERMARK FIX (NO STRETCH)
+    # WATERMARK (BOTTOM FIXED)
     # =========================
-    logo_path = "logo_watermark.jpeg"
+    logo_path = "logo.png"
 
     if os.path.exists(logo_path):
         img = ImageReader(logo_path)
         img_w, img_h = img.getSize()
 
-        # Maintain aspect ratio
         ratio = img_w / img_h
 
-        max_width = width * 0.6
-        max_height = height * 0.4
+        # small size for bottom
+        draw_width = width * 0.5
+        draw_height = draw_width / ratio
 
-        if max_width / ratio <= max_height:
-            draw_width = max_width
-            draw_height = max_width / ratio
-        else:
-            draw_height = max_height
-            draw_width = max_height * ratio
-
-        # CENTER POSITION
+        # position bottom center
         x = (width - draw_width) / 2
-        y = (height - draw_height) / 2
+        y = 80   # 👈 fixed bottom margin
 
         c.saveState()
-        c.setFillAlpha(0.08)   # transparency
+        c.setFillAlpha(0.08)
         c.drawImage(img, x, y, width=draw_width, height=draw_height, mask='auto')
         c.restoreState()
 
@@ -92,7 +83,6 @@ async def convert_to_pdf(
     c.setFont("Helvetica-Bold", 16)
     c.drawString(80, height - 80, "Document Control Information")
 
-    # LINE
     c.setLineWidth(1)
     c.line(80, height - 90, width - 80, height - 90)
 
@@ -121,15 +111,8 @@ async def convert_to_pdf(
     table.setStyle(TableStyle([
         ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
         ("FONTNAME", (0,1), (-1,-1), "Helvetica"),
-
         ("FONTSIZE", (0,0), (-1,-1), 11),
-
-        ("ALIGN", (0,0), (-1,-1), "LEFT"),
-        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-
         ("GRID", (0,0), (-1,-1), 1, colors.black),
-
-        ("BACKGROUND", (0,0), (-1,-1), colors.white),
 
         ("LEFTPADDING", (0,0), (-1,-1), 12),
         ("RIGHTPADDING", (0,0), (-1,-1), 12),
@@ -137,21 +120,20 @@ async def convert_to_pdf(
         ("BOTTOMPADDING", (0,0), (-1,-1), 10),
     ]))
 
-    # POSITION FIX (always visible)
     table.wrapOn(c, width, height)
     table.drawOn(c, 80, height - 350)
 
     c.save()
 
     # =========================
-    # MERGE PDF
+    # MERGE
     # =========================
     merger = PdfMerger()
 
     total_pages = len(reader.pages)
 
-    merger.append(pdf_file, pages=(0, 1))   # first page
-    merger.append(details_pdf)              # second page
+    merger.append(pdf_file, pages=(0, 1))
+    merger.append(details_pdf)
 
     if total_pages > 1:
         merger.append(pdf_file, pages=(1, total_pages))
