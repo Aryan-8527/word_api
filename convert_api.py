@@ -6,7 +6,6 @@ import os
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Table, TableStyle
 from reportlab.lib import colors
-from reportlab.lib.colors import HexColor
 
 from PyPDF2 import PdfMerger, PdfReader
 
@@ -47,37 +46,30 @@ async def convert_to_pdf(
     ], check=True)
 
     pdf_file = "/tmp/" + os.path.splitext(file.filename)[0] + ".pdf"
-
     reader = PdfReader(pdf_file)
 
     # =========================
-    # ORIGINAL PAGE SIZE (KEY FIX)
+    # GET ORIGINAL PAGE SIZE
     # =========================
     first_page = reader.pages[0]
-
     width = float(first_page.mediabox.width)
     height = float(first_page.mediabox.height)
-
-    # 👉 USE ORIGINAL SIZE (NO A4 FORCE)
-    page_size = (width, height)
 
     # =========================
     # CREATE DETAILS PAGE
     # =========================
     details_pdf = "/tmp/details_page.pdf"
-
-    c = canvas.Canvas(details_pdf, pagesize=page_size)
+    c = canvas.Canvas(details_pdf, pagesize=(width, height))
 
     # =========================
-    # TITLE
+    # TITLE (LEFT ALIGNED)
     # =========================
     c.setFont("Helvetica-Bold", 16)
-    c.setFillColor(HexColor("#003366"))
-    c.drawCentredString(width / 2, height , "Document Control Information")
+    c.drawString(80, height - 80, "Document Control Information")
 
-    # Divider
-    c.setLineWidth(1.5)
-    c.line(80, height , width - 80, height)
+    # LINE
+    c.setLineWidth(1)
+    c.line(80, height - 90, width - 80, height - 90)
 
     # =========================
     # TABLE DATA
@@ -92,13 +84,17 @@ async def convert_to_pdf(
         ["Created By", created_by],
     ]
 
-    # 👉 Dynamic width (MAIN FIX)
-    table_width_available = width - 120
+    # =========================
+    # TABLE WIDTH (DOCUMENT STYLE)
+    # =========================
+    table_width = width - 160
 
-    col1 = table_width_available * 0.35
-    col2 = table_width_available * 0.65
+    col_widths = [
+        table_width * 0.35,
+        table_width * 0.65
+    ]
 
-    table = Table(data, colWidths=[col1, col2])
+    table = Table(data, colWidths=col_widths)
 
     table.setStyle(TableStyle([
 
@@ -115,22 +111,18 @@ async def convert_to_pdf(
         ("BACKGROUND", (0,0), (-1,-1), colors.white),
 
         # Padding
-        ("LEFTPADDING", (0,0), (-1,-1), 10),
-        ("RIGHTPADDING", (0,0), (-1,-1), 10),
-        ("TOPPADDING", (0,0), (-1,-1), 8),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 8),
+        ("LEFTPADDING", (0,0), (-1,-1), 12),
+        ("RIGHTPADDING", (0,0), (-1,-1), 12),
+        ("TOPPADDING", (0,0), (-1,-1), 10),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 10),
 
     ]))
 
     # =========================
-    # CENTER TABLE (FIX)
+    # POSITION (FIXED CLEAN LAYOUT)
     # =========================
-    table_width, table_height = table.wrap(0, 0)
-
-    x = (width - table_width) / 2
-    y = height - 180
-
-    table.drawOn(c, x, y)
+    table.wrapOn(c, width, height)
+    table.drawOn(c, 80, height - 300)
 
     c.save()
 
@@ -144,7 +136,7 @@ async def convert_to_pdf(
     # First page
     merger.append(pdf_file, pages=(0, 1))
 
-    # Details page
+    # Insert details page
     merger.append(details_pdf)
 
     # Remaining pages
