@@ -58,7 +58,7 @@ async def convert_to_pdf(
     width = float(first_page.mediabox.width)
     height = float(first_page.mediabox.height)
 
-    # 👉 USE ORIGINAL SIZE (NO A4)
+    # 👉 USE ORIGINAL SIZE (NO A4 FORCE)
     page_size = (width, height)
 
     # =========================
@@ -71,11 +71,11 @@ async def convert_to_pdf(
     # =========================
     # TITLE
     # =========================
-    c.setFont("Helvetica-Bold", 18)
+    c.setFont("Helvetica-Bold", 16)
     c.setFillColor(HexColor("#003366"))
     c.drawCentredString(width / 2, height - 50, "Document Control Information")
 
-    # Divider line
+    # Divider
     c.setLineWidth(1.5)
     c.line(80, height - 60, width - 80, height - 60)
 
@@ -92,26 +92,33 @@ async def convert_to_pdf(
         ["Created By", created_by],
     ]
 
-    table = Table(data, colWidths=[220, 380])
+    # 👉 Dynamic width (MAIN FIX)
+    table_width_available = width - 120
+
+    col1 = table_width_available * 0.35
+    col2 = table_width_available * 0.65
+
+    table = Table(data, colWidths=[col1, col2])
 
     table.setStyle(TableStyle([
 
         ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
         ("FONTNAME", (0,1), (-1,-1), "Helvetica"),
 
-        ("FONTSIZE", (0,0), (-1,-1), 14),
+        ("FONTSIZE", (0,0), (-1,-1), 11),
 
         ("ALIGN", (0,0), (-1,-1), "LEFT"),
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
 
-        ("GRID", (0,0), (-1,-1), 1.2, colors.black),
+        ("GRID", (0,0), (-1,-1), 1, colors.black),
 
         ("BACKGROUND", (0,0), (-1,-1), colors.white),
 
         # Padding
-        ("LEFTPADDING", (0,0), (-1,-1), 12),
-        ("RIGHTPADDING", (0,0), (-1,-1), 12),
-        ("TOPPADDING", (0,0), (-1,-1), 10),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 10),
+        ("LEFTPADDING", (0,0), (-1,-1), 10),
+        ("RIGHTPADDING", (0,0), (-1,-1), 10),
+        ("TOPPADDING", (0,0), (-1,-1), 8),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 8),
 
     ]))
 
@@ -121,7 +128,7 @@ async def convert_to_pdf(
     table_width, table_height = table.wrap(0, 0)
 
     x = (width - table_width) / 2
-    y = height - 200
+    y = height - 180
 
     table.drawOn(c, x, y)
 
@@ -137,7 +144,7 @@ async def convert_to_pdf(
     # First page
     merger.append(pdf_file, pages=(0, 1))
 
-    # Insert Details Page
+    # Details page
     merger.append(details_pdf)
 
     # Remaining pages
