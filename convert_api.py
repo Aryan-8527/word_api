@@ -77,7 +77,7 @@ async def convert_to_pdf(
 
     # Divider
     c.setLineWidth(1.5)
-    c.line(80, height - 60, width - 80, height - 60)
+    c.line(80, height , width - 80, height)
 
     # =========================
     # TABLE DATA
