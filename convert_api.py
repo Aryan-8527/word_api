@@ -6,6 +6,7 @@ import os
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Table, TableStyle
 from reportlab.lib import colors
+from reportlab.lib.utils import ImageReader
 
 from PyPDF2 import PdfMerger, PdfReader
 
@@ -62,7 +63,26 @@ async def convert_to_pdf(
     c = canvas.Canvas(details_pdf, pagesize=(width, height))
 
     # =========================
-    # TITLE (LEFT ALIGNED)
+    # WATERMARK (ONLY SECOND PAGE)
+    # =========================
+    logo_path = "logo_watermark.jpeg"   # 👈 apna image name
+
+    if os.path.exists(logo_path):
+        img = ImageReader(logo_path)
+
+        img_width = width * 0.6
+        img_height = height * 0.3
+
+        x = (width - img_width) / 2
+        y = (height - img_height) / 2
+
+        c.saveState()
+        c.setFillAlpha(0.08)   # transparency (adjust kar sakte ho)
+        c.drawImage(img, x, y, width=img_width, height=img_height, mask='auto')
+        c.restoreState()
+
+    # =========================
+    # TITLE
     # =========================
     c.setFont("Helvetica-Bold", 16)
     c.drawString(80, height - 80, "Document Control Information")
@@ -84,9 +104,7 @@ async def convert_to_pdf(
         ["Created By", created_by],
     ]
 
-    # =========================
-    # TABLE WIDTH (DOCUMENT STYLE)
-    # =========================
+    # TABLE WIDTH
     table_width = width - 160
 
     col_widths = [
@@ -110,7 +128,6 @@ async def convert_to_pdf(
 
         ("BACKGROUND", (0,0), (-1,-1), colors.white),
 
-        # Padding
         ("LEFTPADDING", (0,0), (-1,-1), 12),
         ("RIGHTPADDING", (0,0), (-1,-1), 12),
         ("TOPPADDING", (0,0), (-1,-1), 10),
@@ -118,9 +135,7 @@ async def convert_to_pdf(
 
     ]))
 
-    # =========================
-    # POSITION (FIXED CLEAN LAYOUT)
-    # =========================
+    # POSITION
     table.wrapOn(c, width, height)
     table.drawOn(c, 80, height - 360)
 
@@ -136,7 +151,7 @@ async def convert_to_pdf(
     # First page
     merger.append(pdf_file, pages=(0, 1))
 
-    # Insert details page
+    # Second page (with watermark)
     merger.append(details_pdf)
 
     # Remaining pages
