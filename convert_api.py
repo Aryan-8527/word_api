@@ -4,10 +4,9 @@ import subprocess
 import os
 
 from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4, landscape
-from reportlab.lib.colors import HexColor
 from reportlab.platypus import Table, TableStyle
 from reportlab.lib import colors
+from reportlab.lib.colors import HexColor
 
 from PyPDF2 import PdfMerger, PdfReader
 
@@ -26,12 +25,17 @@ async def convert_to_pdf(
     created_by: str = Form(...)
 ):
 
+    # =========================
+    # SAVE FILE
+    # =========================
     input_path = f"/tmp/{file.filename}"
 
     with open(input_path, "wb") as f:
         f.write(await file.read())
 
-    # Convert to PDF using LibreOffice
+    # =========================
+    # CONVERT TO PDF
+    # =========================
     subprocess.run([
         "libreoffice",
         "--headless",
@@ -46,33 +50,38 @@ async def convert_to_pdf(
 
     reader = PdfReader(pdf_file)
 
+    # =========================
+    # ORIGINAL PAGE SIZE (KEY FIX)
+    # =========================
     first_page = reader.pages[0]
 
     width = float(first_page.mediabox.width)
     height = float(first_page.mediabox.height)
 
-    # Detect orientation
-    is_landscape = width > height
+    # 👉 USE ORIGINAL SIZE (NO A4)
+    page_size = (width, height)
 
-    # Document Details Page
+    # =========================
+    # CREATE DETAILS PAGE
+    # =========================
     details_pdf = "/tmp/details_page.pdf"
-
-    page_size = landscape(A4) if is_landscape else A4
 
     c = canvas.Canvas(details_pdf, pagesize=page_size)
 
-    width, height = page_size
-
-    # Title
-    c.setFont("Helvetica-Bold", 24)
+    # =========================
+    # TITLE
+    # =========================
+    c.setFont("Helvetica-Bold", 18)
     c.setFillColor(HexColor("#003366"))
-    c.drawString(70, height - 80, "Document Control Information")
+    c.drawCentredString(width / 2, height - 50, "Document Control Information")
 
-    # Divider
-    c.setLineWidth(2)
-    c.line(70, height - 90, width - 70, height - 90)
+    # Divider line
+    c.setLineWidth(1.5)
+    c.line(80, height - 60, width - 80, height - 60)
 
-    # Table Data
+    # =========================
+    # TABLE DATA
+    # =========================
     data = [
         ["Document Number", document_code],
         ["Client Name", client_name],
@@ -87,30 +96,40 @@ async def convert_to_pdf(
 
     table.setStyle(TableStyle([
 
-    ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
-    ("FONTNAME", (0,1), (-1,-1), "Helvetica"),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("FONTNAME", (0,1), (-1,-1), "Helvetica"),
 
-    ("FONTSIZE", (0,0), (-1,-1), 14),
+        ("FONTSIZE", (0,0), (-1,-1), 14),
 
-    ("ALIGN", (0,0), (-1,-1), "LEFT"),
+        ("ALIGN", (0,0), (-1,-1), "LEFT"),
 
-    ("GRID", (0,0), (-1,-1), 1.2, colors.black),
+        ("GRID", (0,0), (-1,-1), 1.2, colors.black),
 
-    ("BACKGROUND", (0,0), (-1,-1), colors.white),
+        ("BACKGROUND", (0,0), (-1,-1), colors.white),
 
-    ("LEFTPADDING", (0,0), (-1,-1), 12),
-    ("RIGHTPADDING", (0,0), (-1,-1), 12),
-    ("TOPPADDING", (0,0), (-1,-1), 10),
-    ("BOTTOMPADDING", (0,0), (-1,-1), 10),
+        # Padding
+        ("LEFTPADDING", (0,0), (-1,-1), 12),
+        ("RIGHTPADDING", (0,0), (-1,-1), 12),
+        ("TOPPADDING", (0,0), (-1,-1), 10),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 10),
 
-   ]))
+    ]))
 
-    table.wrapOn(c, width, height)
-    table.drawOn(c, 70, height - 350)
+    # =========================
+    # CENTER TABLE (FIX)
+    # =========================
+    table_width, table_height = table.wrap(0, 0)
+
+    x = (width - table_width) / 2
+    y = height - 200
+
+    table.drawOn(c, x, y)
 
     c.save()
 
-    # Merge PDFs
+    # =========================
+    # MERGE PDF
+    # =========================
     merger = PdfMerger()
 
     total_pages = len(reader.pages)
@@ -118,7 +137,7 @@ async def convert_to_pdf(
     # First page
     merger.append(pdf_file, pages=(0, 1))
 
-    # Details page
+    # Insert Details Page
     merger.append(details_pdf)
 
     # Remaining pages
@@ -130,6 +149,9 @@ async def convert_to_pdf(
     merger.write(final_pdf)
     merger.close()
 
+    # =========================
+    # RETURN FILE
+    # =========================
     return FileResponse(
         final_pdf,
         media_type="application/pdf",
